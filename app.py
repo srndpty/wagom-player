@@ -23,25 +23,55 @@ class VlcEvents(QtCore.QObject):
 
 
 class SeekSlider(QtWidgets.QSlider):
-    """クリック位置に即ジャンプするシークスライダ"""
+    """クリック位置ジャンプ + ドラッグ追従するスライダ"""
     clickedValue = QtCore.pyqtSignal(int)
+
+    def _pos_to_value(self, event: QtGui.QMouseEvent) -> int:
+        if self.orientation() == QtCore.Qt.Horizontal:
+            pos = event.pos().x()
+            span = max(1, self.width())
+        else:
+            pos = self.height() - event.pos().y()
+            span = max(1, self.height())
+        rng = self.maximum() - self.minimum()
+        val = self.minimum() + int(rng * pos / span)
+        return max(self.minimum(), min(self.maximum(), val))
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
         if event.button() == QtCore.Qt.LeftButton:
-            if self.orientation() == QtCore.Qt.Horizontal:
-                pos = event.pos().x()
-                span = max(1, self.width())
-            else:
-                pos = self.height() - event.pos().y()
-                span = max(1, self.height())
-            rng = self.maximum() - self.minimum()
-            val = self.minimum() + int(rng * pos / span)
-            val = max(self.minimum(), min(self.maximum(), val))
+            val = self._pos_to_value(event)
+            self.setSliderDown(True)
             self.setValue(val)
+            try:
+                self.sliderPressed.emit()
+                self.sliderMoved.emit(val)
+            except Exception:
+                pass
             self.clickedValue.emit(val)
-            event.accept()
-            return
+            event.accept(); return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.buttons() & QtCore.Qt.LeftButton and self.isSliderDown():
+            val = self._pos_to_value(event)
+            if val != self.value():
+                self.setValue(val)
+                try:
+                    self.sliderMoved.emit(val)
+                except Exception:
+                    pass
+            event.accept(); return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == QtCore.Qt.LeftButton and self.isSliderDown():
+            self.setSliderDown(False)
+            try:
+                self.sliderReleased.emit()
+            except Exception:
+                pass
+            event.accept(); return
+        super().mouseReleaseEvent(event)
 
 
 class VideoPlayer(QtWidgets.QMainWindow):
@@ -80,6 +110,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # 初期音量をVLCへ反映
         try:
             self.player.audio_set_volume(int(self.volume_slider.value()))
+        except Exception:
+            pass
+        # ミュート状態の初期化（VLCが-1を返す場合は False を既定）
+        self._muted: bool = False
+        try:
+            m = self.player.audio_get_mute()
+            if m in (0, 1):
+                self._muted = (m == 1)
         except Exception:
             pass
         self._update_volume_label()
@@ -403,10 +441,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         pass
 
     def _update_volume_label(self) -> None:
+        # VLCの-1（未対応/エラー）はキャッシュ値を利用
+        muted = self._muted
         try:
-            muted = bool(self.player.audio_get_mute())
+            m = self.player.audio_get_mute()
+            if m in (0, 1):
+                muted = (m == 1)
         except Exception:
-            muted = False
+            pass
+        self._muted = muted
         v = int(self.volume_slider.value())
         text = f"音量: {v}%" + (" (ミュート)" if muted else "")
         self.volume_label.setText(text)
@@ -414,6 +457,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _toggle_mute(self) -> None:
         try:
             self.player.audio_toggle_mute()
+            try:
+                m = self.player.audio_get_mute()
+                if m in (0, 1):
+                    self._muted = (m == 1)
+                else:
+                    self._muted = not self._muted
+            except Exception:
+                self._muted = not self._muted
         except Exception:
             pass
         self._update_volume_label()

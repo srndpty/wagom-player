@@ -273,6 +273,27 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._last_playing_state: Optional[bool] = None
         self._update_play_button()
 
+    # ウィンドウ表示時にWindowsのタイトルバーをダーク化
+    def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._apply_windows_dark_titlebar()
+
+    def _apply_windows_dark_titlebar(self) -> None:
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            dwmapi = ctypes.windll.dwmapi
+            value = ctypes.c_int(1)
+            for attr in (20, 19):  # 1903+, 1809
+                try:
+                    dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), ctypes.c_int(attr), ctypes.byref(value), ctypes.sizeof(value))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # --------------- VLC ---------------
     def _attach_vlc_events(self) -> None:
         em = self.player.event_manager()
@@ -319,7 +340,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._bind_video_surface()
 
         self.player.play()
-        self.setWindowTitle(f"wagom-player - {os.path.basename(path)}")
+        self._update_window_title(os.path.basename(path))
         self.status.showMessage(f"再生中: {path}")
 
         # シーク初期化
@@ -480,6 +501,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self.seek_slider.blockSignals(False)
         # 再生ボタン（▶/⏸）の表示を更新
         self._update_play_button()
+
+    def _update_window_title(self, filename: Optional[str] = None) -> None:
+        name = filename or (os.path.basename(self.playlist[self.current_index]) if 0 <= self.current_index < len(self.playlist) else "")
+        idx = (self.current_index + 1) if self.current_index >= 0 else 0
+        total = len(self.playlist)
+        prefix = f"[{idx}/{total}] " if total else ""
+        self.setWindowTitle(f"wagom-player - {prefix}{name}")
 
     def _update_play_button(self) -> None:
         try:

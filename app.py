@@ -3,6 +3,11 @@ import sys
 from typing import List, Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
+try:
+    # QtSvg をimportしておくとSVGアイコンの読み込みが安定します
+    from PyQt5 import QtSvg  # noqa: F401
+except Exception:
+    QtSvg = None  # type: ignore
 
 try:
     import vlc  # python-vlc
@@ -62,6 +67,11 @@ def apply_dark_theme(app: QtWidgets.QApplication) -> None:
         QStatusBar { background: #2d2d2d; color: #e6e6e6; }
         """
     )
+
+
+def resource_path(*parts: str) -> str:
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, *parts)
 
 
 class VlcEvents(QtCore.QObject):
@@ -194,11 +204,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         ctrl = QtWidgets.QHBoxLayout()
         layout.addLayout(ctrl)
 
-        self.btn_open = QtWidgets.QPushButton("開く")
-        self.btn_play = QtWidgets.QPushButton("再生/一時停止")
-        self.btn_stop = QtWidgets.QPushButton("停止")
-        self.btn_prev = QtWidgets.QPushButton("前へ")
-        self.btn_next = QtWidgets.QPushButton("次へ")
+        self.btn_open = QtWidgets.QPushButton()
+        self.btn_play = QtWidgets.QPushButton()
+        self.btn_stop = QtWidgets.QPushButton()
+        self.btn_prev = QtWidgets.QPushButton()
+        self.btn_next = QtWidgets.QPushButton()
         for b in (self.btn_open, self.btn_play, self.btn_stop, self.btn_prev, self.btn_next):
             ctrl.addWidget(b)
 
@@ -230,6 +240,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         self.volume_slider.clickedValue.connect(self._on_volume_clicked)
 
+        # 記号アイコン設定
+        self._apply_control_icons()
+
         # メニュー（簡易）
         menu = self.menuBar().addMenu("ファイル")
         act_open = menu.addAction("開く...")
@@ -238,6 +251,27 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # ドロップ対応
         self.setAcceptDrops(True)
+
+    def _apply_control_icons(self) -> None:
+        # 記号（Unicode）を利用したシンプルなアイコン
+        def style_btn(btn: QtWidgets.QPushButton, icon_path: str, tip: str):
+            btn.setIcon(QtGui.QIcon(icon_path))
+            btn.setToolTip(tip)
+            btn.setFixedSize(36, 28)
+            btn.setIconSize(QtCore.QSize(18, 18))
+
+        style_btn(self.btn_open, resource_path("resources", "icons", "open.svg"), "開く")
+        style_btn(self.btn_stop, resource_path("resources", "icons", "stop.svg"), "停止")
+        style_btn(self.btn_prev, resource_path("resources", "icons", "prev.svg"), "前へ")
+        style_btn(self.btn_next, resource_path("resources", "icons", "next.svg"), "次へ")
+
+        # 再生/一時停止は状態に応じて更新（アイコン2種を保持）
+        self._icon_play = QtGui.QIcon(resource_path("resources", "icons", "play.svg"))
+        self._icon_pause = QtGui.QIcon(resource_path("resources", "icons", "pause.svg"))
+        self.btn_play.setFixedSize(36, 28)
+        self.btn_play.setIconSize(QtCore.QSize(18, 18))
+        self._last_playing_state: Optional[bool] = None
+        self._update_play_button()
 
     # --------------- VLC ---------------
     def _attach_vlc_events(self) -> None:
@@ -314,6 +348,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.player.pause()
         else:
             self.player.play()
+        self._update_play_button()
 
     def stop(self) -> None:
         self.player.stop()
@@ -322,6 +357,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.setRange(0, 0)
         self.seek_slider.setValue(0)
         self.seek_slider.blockSignals(False)
+        self._update_play_button()
 
     def seek_by(self, delta_ms: int) -> None:
         try:
@@ -435,6 +471,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self.seek_slider.blockSignals(True)
                 self.seek_slider.setValue(cur)
                 self.seek_slider.blockSignals(False)
+        # 再生ボタン（▶/⏸）の表示を更新
+        self._update_play_button()
+
+    def _update_play_button(self) -> None:
+        try:
+            playing = bool(self.player.is_playing())
+        except Exception:
+            playing = False
+        if getattr(self, "_last_playing_state", None) is None or self._last_playing_state != playing:
+            self.btn_play.setIcon(self._icon_pause if playing else self._icon_play)
+            self.btn_play.setToolTip("一時停止" if playing else "再生")
+            self._last_playing_state = playing
 
     # ------------- シークバー操作 -------------
     def _on_seek_pressed(self) -> None:

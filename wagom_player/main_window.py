@@ -57,6 +57,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # シーク状態
         self._seeking_user: bool = False
         self._media_length: int = -1
+        self._ending: bool = False
 
         # 初期音量
         try:
@@ -106,7 +107,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_stop = QtWidgets.QPushButton()
         self.btn_prev = QtWidgets.QPushButton()
         self.btn_next = QtWidgets.QPushButton()
-        for b in (self.btn_open, self.btn_play, self.btn_stop, self.btn_prev, self.btn_next):
+        self.btn_repeat = QtWidgets.QPushButton()
+        self.btn_repeat.setCheckable(True)
+        for b in (self.btn_open, self.btn_play, self.btn_stop, self.btn_prev, self.btn_next, self.btn_repeat):
             ctrl.addWidget(b)
         ctrl.addStretch(1)
 
@@ -132,6 +135,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_stop.clicked.connect(self.stop)
         self.btn_prev.clicked.connect(self.play_previous)
         self.btn_next.clicked.connect(self.play_next)
+        self.btn_repeat.toggled.connect(self._on_repeat_toggled)
         self.seek_slider.sliderPressed.connect(self._on_seek_pressed)
         self.seek_slider.sliderReleased.connect(self._on_seek_released)
         self.seek_slider.sliderMoved.connect(self._on_slider_moved)
@@ -174,6 +178,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._icon_mute = QtGui.QIcon(resource_path("resources", "icons", "mute.svg"))
         if hasattr(self, "volume_icon"):
             self.volume_icon.setPixmap((self._icon_volume).pixmap(18, 18))
+        # リピートアイコン
+        self._icon_repeat_on = QtGui.QIcon(resource_path("resources", "icons", "repeat.svg"))
+        self._icon_repeat_off = QtGui.QIcon(resource_path("resources", "icons", "repeat_off.svg"))
+        self.btn_repeat.setFixedSize(36, 28)
+        self.btn_repeat.setIconSize(QtCore.QSize(18, 18))
+        self.btn_repeat.setToolTip("リピート再生")
+        self.repeat_enabled = False
+        self._update_repeat_button()
 
     # タイトルバーのダーク化（Windows）
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802
@@ -221,12 +233,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
         is_max = bool(self.settings.value("isMaximized", False, type=bool))
         if is_max:
             self.setWindowState(self.windowState() | QtCore.Qt.WindowMaximized)
+        # リピート状態（デフォルトOFF）
+        repeat = bool(self.settings.value("repeat", False, type=bool))
+        self.btn_repeat.setChecked(repeat)
+        self.repeat_enabled = repeat
+        self._update_repeat_button()
 
     def _save_settings(self) -> None:
         try:
             self.settings.setValue("volume", int(self.volume_slider.value()))
             self.settings.setValue("geometry", self.saveGeometry())
             self.settings.setValue("isMaximized", self.isMaximized())
+            self.settings.setValue("repeat", bool(self.repeat_enabled))
         except Exception:
             pass
 
@@ -238,13 +256,39 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _attach_vlc_events(self) -> None:
         em = self.player.event_manager()
         em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end)
-        self.vlc_events.media_ended.connect(self._on_media_ended_in_qt)
+        self.vlc_events.media_ended.connect(self._on_media_end)
 
     def _on_vlc_end(self, event) -> None:
         self.vlc_events.media_ended.emit()
 
+    def _on_media_end(self) -> None:
+        # 単曲リピートを最優先。処理の重複を避けるため遅延して切替。
+        if getattr(self, "_ending", False):
+            return
+        self._ending = True
+        cur = self.current_index
+        total = len(self.playlist)
+        if self.repeat_enabled and 0 <= cur < total:
+            QtCore.QTimer.singleShot(80, lambda idx=cur: self._end_after(idx))
+            return
+        if cur + 1 < total:
+            QtCore.QTimer.singleShot(80, lambda idx=cur + 1: self._end_after(idx))
+        else:
+            self._ending = False
+            self.stop()
+
+    def _end_after(self, idx: int) -> None:
+        self._ending = False
+        self.play_at(idx)
+
     def _on_media_ended_in_qt(self) -> None:
-        self.play_next()
+        # 最後まで到達したらリピート設定に従う
+        if self.current_index + 1 < len(self.playlist):
+            self.play_next()
+        elif self.repeat_enabled:
+            QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index))
+        else:
+            self.stop()
 
     def _bind_video_surface(self) -> None:
         wid = int(self.video_frame.winId())
@@ -270,6 +314,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         self.current_index = index
         path = self.playlist[index]
+        # 切替安定化のため一旦停止
+        try:
+            self.player.stop()
+        except Exception:
+            pass
         media = self.vlc_instance.media_new(path)
         self.player.set_media(media)
 
@@ -290,14 +339,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def play_next(self) -> None:
         if not self.playlist:
             return
-        next_index = (self.current_index + 1) if (self.current_index + 1) < len(self.playlist) else 0
-        self.play_at(next_index)
+        if (self.current_index + 1) < len(self.playlist):
+            QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index + 1))
 
     def play_previous(self) -> None:
         if not self.playlist:
             return
-        prev_index = (self.current_index - 1) if (self.current_index - 1) >= 0 else len(self.playlist) - 1
-        self.play_at(prev_index)
+        if (self.current_index - 1) >= 0:
+            QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index - 1))
 
     # ------------- 再生操作 -------------
     def toggle_play(self) -> None:
@@ -393,6 +442,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # 前/次動画
         self._sc_prev_track = mk(QtCore.Qt.Key_PageUp, self.play_previous)
         self._sc_next_track = mk(QtCore.Qt.Key_PageDown, self.play_next)
+        # Rキーでリピート切替（任意）
+        self._sc_repeat = mk(QtCore.Qt.Key_R, lambda: self.btn_repeat.toggle())
 
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
@@ -510,6 +561,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         if hasattr(self, "volume_icon"):
             self.volume_icon.setPixmap(icon.pixmap(18, 18))
 
+    def _on_repeat_toggled(self, checked: bool) -> None:
+        self.repeat_enabled = bool(checked)
+        self._update_repeat_button()
+
+    def _update_repeat_button(self) -> None:
+        self.btn_repeat.setIcon(self._icon_repeat_on if self.repeat_enabled else self._icon_repeat_off)
+        # 押下状態の視覚フィードバック
+        self.btn_repeat.setChecked(self.repeat_enabled)
+
     def _toggle_mute(self) -> None:
         self._muted = not self._muted
         try:
@@ -534,3 +594,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 pass
             play_first = not self.playlist
             self.add_to_playlist(files, play_first=play_first)
+
+
+

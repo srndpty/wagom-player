@@ -390,10 +390,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
             event.accept(); return
 
         if is_keypad and key == QtCore.Qt.Key_4:
-            self.seek_by(-self.SEEK_LONG_MS)
+            # Num4: 60秒進む
+            self.seek_by(self.SEEK_LONG_MS)
             event.accept(); return
         if is_keypad and key == QtCore.Qt.Key_1:
-            self.seek_by(self.SEEK_LONG_MS)
+            # Num1: 60秒戻る
+            self.seek_by(-self.SEEK_LONG_MS)
             event.accept(); return
 
         if key == QtCore.Qt.Key_PageUp:
@@ -431,6 +433,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_num0 = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_0 | QtCore.Qt.KeypadModifier)), self)
         self._sc_num0.setContext(QtCore.Qt.ApplicationShortcut)
         self._sc_num0.activated.connect(self.showMaximized)
+        # PageUp/PageDown をアプリ全体ショートカットに
+        self._sc_prev_track = mk(QtCore.Qt.Key_PageUp, self.play_previous)
+        self._sc_next_track = mk(QtCore.Qt.Key_PageDown, self.play_next)
 
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802

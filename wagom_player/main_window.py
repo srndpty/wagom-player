@@ -111,11 +111,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         ctrl.addStretch(1)
 
         # 音量
+        self.volume_icon = QtWidgets.QLabel()
+        self.volume_icon.setFixedSize(18, 18)
+        self.volume_icon.setAlignment(QtCore.Qt.AlignCenter)
         self.volume_label = QtWidgets.QLabel("音量")
         self.volume_slider = SeekSlider(QtCore.Qt.Horizontal, self)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setFixedWidth(140)
         self.volume_slider.setValue(80)
+        ctrl.addWidget(self.volume_icon)
         ctrl.addWidget(self.volume_label)
         ctrl.addWidget(self.volume_slider)
 
@@ -165,6 +169,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_play.setIconSize(QtCore.QSize(18, 18))
         self._last_playing_state: Optional[bool] = None
         self._update_play_button()
+        # 音量アイコン
+        self._icon_volume = QtGui.QIcon(resource_path("resources", "icons", "volume.svg"))
+        self._icon_mute = QtGui.QIcon(resource_path("resources", "icons", "mute.svg"))
+        if hasattr(self, "volume_icon"):
+            self.volume_icon.setPixmap((self._icon_volume).pixmap(18, 18))
 
     # タイトルバーのダーク化（Windows）
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802
@@ -495,8 +504,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _update_volume_label(self) -> None:
         v = int(self.volume_slider.value())
-        text = f"音量: {v}%" + (" (ミュート)" if self._muted else "")
-        self.volume_label.setText(text)
+        self.volume_label.setText(f"音量: {v}%")
+        # アイコン切り替え
+        icon = self._icon_mute if self._muted else self._icon_volume
+        if hasattr(self, "volume_icon"):
+            self.volume_icon.setPixmap(icon.pixmap(18, 18))
 
     def _toggle_mute(self) -> None:
         self._muted = not self._muted

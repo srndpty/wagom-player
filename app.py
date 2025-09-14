@@ -441,30 +441,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         pass
 
     def _update_volume_label(self) -> None:
-        # VLCの-1（未対応/エラー）はキャッシュ値を利用
-        muted = self._muted
-        try:
-            m = self.player.audio_get_mute()
-            if m in (0, 1):
-                muted = (m == 1)
-        except Exception:
-            pass
-        self._muted = muted
+        # UIはキャッシュされたミュート状態を信頼して即時反映
         v = int(self.volume_slider.value())
-        text = f"音量: {v}%" + (" (ミュート)" if muted else "")
+        text = f"音量: {v}%" + (" (ミュート)" if self._muted else "")
         self.volume_label.setText(text)
 
     def _toggle_mute(self) -> None:
+        # VLCの戻りが遅延する場合があるため、まずキャッシュを反転して即時UI反映
+        self._muted = not self._muted
         try:
             self.player.audio_toggle_mute()
-            try:
-                m = self.player.audio_get_mute()
-                if m in (0, 1):
-                    self._muted = (m == 1)
-                else:
-                    self._muted = not self._muted
-            except Exception:
-                self._muted = not self._muted
         except Exception:
             pass
         self._update_volume_label()

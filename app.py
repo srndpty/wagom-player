@@ -82,6 +82,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.player.audio_set_volume(int(self.volume_slider.value()))
         except Exception:
             pass
+        self._update_volume_label()
 
         # アプリ全体のショートカット
         self._setup_shortcuts()
@@ -122,7 +123,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # ボリュームバー
         self.volume_label = QtWidgets.QLabel("音量")
-        self.volume_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self)
+        self.volume_slider = SeekSlider(QtCore.Qt.Horizontal, self)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setFixedWidth(140)
         self.volume_slider.setValue(80)
@@ -143,6 +144,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.sliderMoved.connect(self._on_slider_moved)
         self.seek_slider.clickedValue.connect(self._on_slider_clicked)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        self.volume_slider.clickedValue.connect(self._on_volume_clicked)
 
         # メニュー（簡易）
         menu = self.menuBar().addMenu("ファイル")
@@ -306,6 +308,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_right = mk(QtCore.Qt.Key_Right, lambda: self.seek_by(self.SEEK_SHORT_MS))
         self._sc_up = mk(QtCore.Qt.Key_Up, lambda: self._adjust_volume(+10))
         self._sc_down = mk(QtCore.Qt.Key_Down, lambda: self._adjust_volume(-10))
+        self._sc_mute = mk(QtCore.Qt.Key_M, self._toggle_mute)
 
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
@@ -387,12 +390,33 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.player.audio_set_volume(int(value))
         except Exception:
             pass
+        self._update_volume_label()
 
     def _adjust_volume(self, delta: int) -> None:
         v = int(self.volume_slider.value())
         nv = max(0, min(100, v + delta))
         if nv != v:
             self.volume_slider.setValue(nv)
+
+    def _on_volume_clicked(self, value: int) -> None:
+        # クリック位置を即時反映（valueChangedが発火するためここでは何もしない）
+        pass
+
+    def _update_volume_label(self) -> None:
+        try:
+            muted = bool(self.player.audio_get_mute())
+        except Exception:
+            muted = False
+        v = int(self.volume_slider.value())
+        text = f"音量: {v}%" + (" (ミュート)" if muted else "")
+        self.volume_label.setText(text)
+
+    def _toggle_mute(self) -> None:
+        try:
+            self.player.audio_toggle_mute()
+        except Exception:
+            pass
+        self._update_volume_label()
 
     # ------------- ファイルダイアログ -------------
     def open_files_dialog(self) -> None:

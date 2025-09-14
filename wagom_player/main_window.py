@@ -1,0 +1,478 @@
+import os
+import sys
+from typing import List, Optional
+
+from PyQt5 import QtCore, QtGui, QtWidgets
+
+from .seek_slider import SeekSlider
+from .theme import resource_path
+
+try:
+    import vlc
+except ImportError as e:
+    raise SystemExit("python-vlc が見つかりません。`pip install python-vlc` を実行してください") from e
+
+
+def _create_vlc_instance() -> "vlc.Instance":
+    lib_path = os.environ.get("PYTHON_VLC_LIB_PATH")
+    if lib_path and os.path.isdir(lib_path):
+        return vlc.Instance([f"--plugin-path={lib_path}"])  # type: ignore[arg-type]
+    return vlc.Instance()
+
+
+class VlcEvents(QtCore.QObject):
+    media_ended = QtCore.pyqtSignal()
+
+
+class VideoPlayer(QtWidgets.QMainWindow):
+    SEEK_SHORT_MS = 10_000
+    SEEK_LONG_MS = 60_000
+
+    def __init__(self, files: Optional[List[str]] = None):
+        super().__init__()
+        self.setWindowTitle("wagom-player")
+        self.resize(960, 540)
+
+        # VLC
+        self.vlc_instance = _create_vlc_instance()
+        self.player: vlc.MediaPlayer = self.vlc_instance.media_player_new()
+        self.vlc_events = VlcEvents()
+        self._attach_vlc_events()
+
+        # UI
+        self._build_ui()
+
+        # プレイリスト
+        self.playlist: List[str] = []
+        self.current_index: int = -1
+        if files:
+            self.add_to_playlist(files, play_first=True)
+
+        # タイマー
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self._update_status_time)
+        self.timer.start(200)
+
+        # シーク状態
+        self._seeking_user: bool = False
+        self._media_length: int = -1
+
+        # 初期音量
+        try:
+            self.player.audio_set_volume(int(self.volume_slider.value()))
+        except Exception:
+            pass
+        self._muted: bool = False
+        try:
+            m = self.player.audio_get_mute()
+            if m in (0, 1):
+                self._muted = (m == 1)
+        except Exception:
+            pass
+        self._update_volume_label()
+
+        # ショートカット
+        self._setup_shortcuts()
+
+    # ---------------- UI ----------------
+    def _build_ui(self) -> None:
+        central = QtWidgets.QWidget(self)
+        self.setCentralWidget(central)
+
+        layout = QtWidgets.QVBoxLayout(central)
+
+        # 映像
+        self.video_frame = QtWidgets.QFrame(self)
+        self.video_frame.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.video_frame.setStyleSheet("background: #000;")
+        layout.addWidget(self.video_frame, 1)
+
+        # シークバー
+        self.seek_slider = SeekSlider(QtCore.Qt.Horizontal, self)
+        self.seek_slider.setRange(0, 0)
+        self.seek_slider.setEnabled(False)
+        layout.addWidget(self.seek_slider)
+
+        # コントロール
+        ctrl = QtWidgets.QHBoxLayout()
+        layout.addLayout(ctrl)
+
+        self.btn_open = QtWidgets.QPushButton()
+        self.btn_play = QtWidgets.QPushButton()
+        self.btn_stop = QtWidgets.QPushButton()
+        self.btn_prev = QtWidgets.QPushButton()
+        self.btn_next = QtWidgets.QPushButton()
+        for b in (self.btn_open, self.btn_play, self.btn_stop, self.btn_prev, self.btn_next):
+            ctrl.addWidget(b)
+        ctrl.addStretch(1)
+
+        # 音量
+        self.volume_label = QtWidgets.QLabel("音量")
+        self.volume_slider = SeekSlider(QtCore.Qt.Horizontal, self)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setFixedWidth(140)
+        self.volume_slider.setValue(80)
+        ctrl.addWidget(self.volume_label)
+        ctrl.addWidget(self.volume_slider)
+
+        self.status = self.statusBar()
+        self.status.showMessage("準備完了")
+
+        # シグナル
+        self.btn_open.clicked.connect(self.open_files_dialog)
+        self.btn_play.clicked.connect(self.toggle_play)
+        self.btn_stop.clicked.connect(self.stop)
+        self.btn_prev.clicked.connect(self.play_previous)
+        self.btn_next.clicked.connect(self.play_next)
+        self.seek_slider.sliderPressed.connect(self._on_seek_pressed)
+        self.seek_slider.sliderReleased.connect(self._on_seek_released)
+        self.seek_slider.sliderMoved.connect(self._on_slider_moved)
+        self.seek_slider.clickedValue.connect(self._on_slider_clicked)
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        self.volume_slider.clickedValue.connect(self._on_volume_clicked)
+
+        # アイコン
+        self._apply_control_icons()
+
+        # メニュー
+        menu = self.menuBar().addMenu("ファイル")
+        act_open = menu.addAction("開く...")
+        act_open.setShortcut("Ctrl+O")
+        act_open.triggered.connect(self.open_files_dialog)
+
+        # ドロップ
+        self.setAcceptDrops(True)
+
+    def _apply_control_icons(self) -> None:
+        def style_btn(btn: QtWidgets.QPushButton, icon_path: str, tip: str):
+            btn.setIcon(QtGui.QIcon(icon_path))
+            btn.setToolTip(tip)
+            btn.setFixedSize(36, 28)
+            btn.setIconSize(QtCore.QSize(18, 18))
+
+        style_btn(self.btn_open, resource_path("resources", "icons", "open.svg"), "開く")
+        style_btn(self.btn_stop, resource_path("resources", "icons", "stop.svg"), "停止")
+        style_btn(self.btn_prev, resource_path("resources", "icons", "prev.svg"), "前へ")
+        style_btn(self.btn_next, resource_path("resources", "icons", "next.svg"), "次へ")
+
+        self._icon_play = QtGui.QIcon(resource_path("resources", "icons", "play.svg"))
+        self._icon_pause = QtGui.QIcon(resource_path("resources", "icons", "pause.svg"))
+        self.btn_play.setFixedSize(36, 28)
+        self.btn_play.setIconSize(QtCore.QSize(18, 18))
+        self._last_playing_state: Optional[bool] = None
+        self._update_play_button()
+
+    # タイトルバーのダーク化（Windows）
+    def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._apply_windows_dark_titlebar()
+
+    def _apply_windows_dark_titlebar(self) -> None:
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            dwmapi = ctypes.windll.dwmapi
+            value = ctypes.c_int(1)
+            for attr in (20, 19):
+                try:
+                    dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), ctypes.c_int(attr), ctypes.byref(value), ctypes.sizeof(value))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # --------------- VLC ---------------
+    def _attach_vlc_events(self) -> None:
+        em = self.player.event_manager()
+        em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end)
+        self.vlc_events.media_ended.connect(self._on_media_ended_in_qt)
+
+    def _on_vlc_end(self, event) -> None:
+        self.vlc_events.media_ended.emit()
+
+    def _on_media_ended_in_qt(self) -> None:
+        self.play_next()
+
+    def _bind_video_surface(self) -> None:
+        wid = int(self.video_frame.winId())
+        if sys.platform.startswith("win"):
+            self.player.set_hwnd(wid)
+        elif sys.platform == "darwin":
+            self.player.set_nsobject(wid)  # type: ignore[attr-defined]
+        else:
+            self.player.set_xwindow(wid)  # type: ignore[attr-defined]
+
+    # ------------- プレイリスト -------------
+    def add_to_playlist(self, files: List[str], play_first: bool = False) -> None:
+        added = [f for f in files if os.path.isfile(f)]
+        if not added:
+            return
+        start_index = len(self.playlist)
+        self.playlist.extend(added)
+        if play_first:
+            self.play_at(start_index)
+
+    def play_at(self, index: int) -> None:
+        if not (0 <= index < len(self.playlist)):
+            return
+        self.current_index = index
+        path = self.playlist[index]
+        media = self.vlc_instance.media_new(path)
+        self.player.set_media(media)
+
+        QtWidgets.QApplication.processEvents()
+        self._bind_video_surface()
+
+        self.player.play()
+        self._update_window_title(os.path.basename(path))
+        self.status.showMessage(f"再生中: {path}")
+
+        self._media_length = -1
+        self.seek_slider.blockSignals(True)
+        self.seek_slider.setEnabled(True)
+        self.seek_slider.setRange(0, 0)
+        self.seek_slider.setValue(0)
+        self.seek_slider.blockSignals(False)
+
+    def play_next(self) -> None:
+        if not self.playlist:
+            return
+        next_index = (self.current_index + 1) if (self.current_index + 1) < len(self.playlist) else 0
+        self.play_at(next_index)
+
+    def play_previous(self) -> None:
+        if not self.playlist:
+            return
+        prev_index = (self.current_index - 1) if (self.current_index - 1) >= 0 else len(self.playlist) - 1
+        self.play_at(prev_index)
+
+    # ------------- 再生操作 -------------
+    def toggle_play(self) -> None:
+        if self.player.is_playing():
+            self.player.pause()
+        else:
+            self.player.play()
+        self._update_play_button()
+
+    def stop(self) -> None:
+        self.player.stop()
+        self.seek_slider.blockSignals(True)
+        self.seek_slider.setEnabled(False)
+        self.seek_slider.setRange(0, 0)
+        self.seek_slider.setValue(0)
+        self.seek_slider.blockSignals(False)
+        self._update_play_button()
+
+    def seek_by(self, delta_ms: int) -> None:
+        try:
+            t = self.player.get_time()
+            if t == -1:
+                return
+            new_t = max(0, t + delta_ms)
+            length = self.player.get_length()
+            if length > 0:
+                new_t = min(new_t, length - 1000)
+            self.player.set_time(new_t)
+        except Exception:
+            pass
+
+    # ------------- キー操作 -------------
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        key = event.key()
+        mods = event.modifiers()
+        is_keypad = bool(mods & QtCore.Qt.KeypadModifier)
+
+        if key == QtCore.Qt.Key_Space:
+            self.toggle_play()
+            event.accept(); return
+
+        if key == QtCore.Qt.Key_Left:
+            self.seek_by(-self.SEEK_SHORT_MS)
+            event.accept(); return
+        if key == QtCore.Qt.Key_Right:
+            self.seek_by(self.SEEK_SHORT_MS)
+            event.accept(); return
+
+        if is_keypad and key == QtCore.Qt.Key_4:
+            # Num4: 60秒進む
+            self.seek_by(self.SEEK_LONG_MS)
+            event.accept(); return
+        if is_keypad and key == QtCore.Qt.Key_1:
+            # Num1: 60秒戻る
+            self.seek_by(-self.SEEK_LONG_MS)
+            event.accept(); return
+
+        if key == QtCore.Qt.Key_PageUp:
+            self.play_previous()
+            event.accept(); return
+        if key == QtCore.Qt.Key_PageDown:
+            self.play_next()
+            event.accept(); return
+
+        if is_keypad and key == QtCore.Qt.Key_8:
+            self.close()
+            event.accept(); return
+
+        if is_keypad and key == QtCore.Qt.Key_0:
+            # Num0 は常に最大化
+            self.showMaximized()
+            event.accept(); return
+
+        super().keyPressEvent(event)
+
+    # ------------- グローバルショートカット -------------
+    def _setup_shortcuts(self) -> None:
+        def mk(key, handler):
+            sc = QtWidgets.QShortcut(QtGui.QKeySequence(key), self)
+            sc.setContext(QtCore.Qt.ApplicationShortcut)
+            sc.activated.connect(handler)
+            return sc
+
+        self._sc_left = mk(QtCore.Qt.Key_Left, lambda: self.seek_by(-self.SEEK_SHORT_MS))
+        self._sc_right = mk(QtCore.Qt.Key_Right, lambda: self.seek_by(self.SEEK_SHORT_MS))
+        self._sc_up = mk(QtCore.Qt.Key_Up, lambda: self._adjust_volume(+10))
+        self._sc_down = mk(QtCore.Qt.Key_Down, lambda: self._adjust_volume(-10))
+        self._sc_mute = mk(QtCore.Qt.Key_M, self._toggle_mute)
+        # Num 0（テンキー0）
+        self._sc_num0 = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_0 | QtCore.Qt.KeypadModifier)), self)
+        self._sc_num0.setContext(QtCore.Qt.ApplicationShortcut)
+        self._sc_num0.activated.connect(self.showMaximized)
+        # 前/次動画
+        self._sc_prev_track = mk(QtCore.Qt.Key_PageUp, self.play_previous)
+        self._sc_next_track = mk(QtCore.Qt.Key_PageDown, self.play_next)
+
+    # ------------- D&D -------------
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:  # noqa: N802
+        urls = event.mimeData().urls()
+        files = [u.toLocalFile() for u in urls if u.isLocalFile()]
+        if files:
+            first = not self.playlist
+            self.add_to_playlist(files, play_first=first)
+            event.acceptProposedAction()
+
+    # ------------- ステータス更新 -------------
+    def _update_status_time(self) -> None:
+        if not self.player:
+            return
+        cur = self.player.get_time()
+        total = self.player.get_length()
+        def f(ms: int) -> str:
+            if ms <= 0:
+                return "00:00"
+            s = ms // 1000
+            m, s = divmod(s, 60)
+            h, m = divmod(m, 60)
+            return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+        if cur >= 0 and total > 0:
+            self.status.showMessage(f"{f(cur)} / {f(total)}")
+            if total != self._media_length:
+                self._media_length = total
+                self.seek_slider.blockSignals(True)
+                self.seek_slider.setEnabled(True)
+                self.seek_slider.setRange(0, total)
+                self.seek_slider.blockSignals(False)
+            if not self._seeking_user:
+                self.seek_slider.blockSignals(True)
+                self.seek_slider.setValue(cur)
+                self.seek_slider.blockSignals(False)
+        # 再生ボタン表示
+        self._update_play_button()
+
+    def _update_window_title(self, filename: Optional[str] = None) -> None:
+        name = filename or (os.path.basename(self.playlist[self.current_index]) if 0 <= self.current_index < len(self.playlist) else "")
+        idx = (self.current_index + 1) if self.current_index >= 0 else 0
+        total = len(self.playlist)
+        prefix = f"[{idx}/{total}] " if total else ""
+        self.setWindowTitle(f"wagom-player - {prefix}{name}")
+
+    def _update_play_button(self) -> None:
+        try:
+            playing = bool(self.player.is_playing())
+        except Exception:
+            playing = False
+        if getattr(self, "_last_playing_state", None) is None or self._last_playing_state != playing:
+            self.btn_play.setIcon(self._icon_pause if playing else self._icon_play)
+            self.btn_play.setToolTip("一時停止" if playing else "再生")
+            self._last_playing_state = playing
+
+    # ------------- シークバー操作 -------------
+    def _on_seek_pressed(self) -> None:
+        self._seeking_user = True
+
+    def _on_seek_released(self) -> None:
+        self._seeking_user = False
+        val = self.seek_slider.value()
+        try:
+            self.player.set_time(val)
+        except Exception:
+            pass
+
+    def _on_slider_moved(self, value: int) -> None:
+        total = self._media_length if self._media_length > 0 else self.player.get_length()
+        def f(ms: int) -> str:
+            if ms <= 0:
+                return "00:00"
+            s = ms // 1000
+            m, s = divmod(s, 60)
+            h, m = divmod(m, 60)
+            return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+        if total > 0:
+            self.status.showMessage(f"{f(value)} / {f(total)}")
+
+    def _on_slider_clicked(self, value: int) -> None:
+        try:
+            self.player.set_time(value)
+        except Exception:
+            pass
+
+    # ------------- 音量操作 -------------
+    def _on_volume_changed(self, value: int) -> None:
+        try:
+            self.player.audio_set_volume(int(value))
+        except Exception:
+            pass
+        self._update_volume_label()
+
+    def _adjust_volume(self, delta: int) -> None:
+        v = int(self.volume_slider.value())
+        nv = max(0, min(100, v + delta))
+        if nv != v:
+            self.volume_slider.setValue(nv)
+
+    def _on_volume_clicked(self, value: int) -> None:
+        # クリック位置を即時反映（valueChangedで反映される）
+        pass
+
+    def _update_volume_label(self) -> None:
+        v = int(self.volume_slider.value())
+        text = f"音量: {v}%" + (" (ミュート)" if self._muted else "")
+        self.volume_label.setText(text)
+
+    def _toggle_mute(self) -> None:
+        self._muted = not self._muted
+        try:
+            self.player.audio_toggle_mute()
+        except Exception:
+            pass
+        self._update_volume_label()
+
+    # ------------- ファイルダイアログ -------------
+    def open_files_dialog(self) -> None:
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "動画ファイルを選択",
+            os.path.expanduser("~"),
+            "動画ファイル (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.ts *.m4v);;すべてのファイル (*.*)",
+        )
+        if files:
+            play_first = not self.playlist
+            self.add_to_playlist(files, play_first=play_first)
+

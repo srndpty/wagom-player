@@ -77,6 +77,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._seeking_user: bool = False
         self._media_length: int = -1
 
+        # 初期音量をVLCへ反映
+        try:
+            self.player.audio_set_volume(int(self.volume_slider.value()))
+        except Exception:
+            pass
+
+        # アプリ全体のショートカット
+        self._setup_shortcuts()
+
     # ---------------- UI ----------------
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget(self)
@@ -285,6 +294,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         super().keyPressEvent(event)
 
+    # ------------- グローバルショートカット -------------
+    def _setup_shortcuts(self) -> None:
+        def mk(key, handler):
+            sc = QtWidgets.QShortcut(QtGui.QKeySequence(key), self)
+            sc.setContext(QtCore.Qt.ApplicationShortcut)
+            sc.activated.connect(handler)
+            return sc
+
+        self._sc_left = mk(QtCore.Qt.Key_Left, lambda: self.seek_by(-self.SEEK_SHORT_MS))
+        self._sc_right = mk(QtCore.Qt.Key_Right, lambda: self.seek_by(self.SEEK_SHORT_MS))
+        self._sc_up = mk(QtCore.Qt.Key_Up, lambda: self._adjust_volume(+10))
+        self._sc_down = mk(QtCore.Qt.Key_Down, lambda: self._adjust_volume(-10))
+
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
@@ -365,6 +387,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.player.audio_set_volume(int(value))
         except Exception:
             pass
+
+    def _adjust_volume(self, delta: int) -> None:
+        v = int(self.volume_slider.value())
+        nv = max(0, min(100, v + delta))
+        if nv != v:
+            self.volume_slider.setValue(nv)
 
     # ------------- ファイルダイアログ -------------
     def open_files_dialog(self) -> None:

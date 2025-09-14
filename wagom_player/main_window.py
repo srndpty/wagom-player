@@ -32,6 +32,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("wagom-player")
         self.resize(960, 540)
+        self.settings = QtCore.QSettings()
 
         # VLC
         self.vlc_instance = _create_vlc_instance()
@@ -73,6 +74,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # ショートカット
         self._setup_shortcuts()
+
+        # 設定の復元（レイアウト構築・初期化後）
+        self._load_settings()
 
     # ---------------- UI ----------------
     def _build_ui(self) -> None:
@@ -182,6 +186,44 @@ class VideoPlayer(QtWidgets.QMainWindow):
                     pass
         except Exception:
             pass
+
+    # --------------- 設定保存/復元 ---------------
+    def _load_settings(self) -> None:
+        try:
+            vol = int(self.settings.value("volume", 80))
+        except Exception:
+            vol = 80
+        vol = max(0, min(100, vol))
+        if vol != int(self.volume_slider.value()):
+            self.volume_slider.setValue(vol)
+
+        # ミュート状態は保存しない（常に起動時はミュートOFF）
+        self._muted = False
+        try:
+            self.player.audio_set_mute(False)
+        except Exception:
+            pass
+        self._update_volume_label()
+
+        # ウィンドウ配置
+        geom = self.settings.value("geometry")
+        if isinstance(geom, QtCore.QByteArray):
+            self.restoreGeometry(geom)
+        is_max = bool(self.settings.value("isMaximized", False, type=bool))
+        if is_max:
+            self.setWindowState(self.windowState() | QtCore.Qt.WindowMaximized)
+
+    def _save_settings(self) -> None:
+        try:
+            self.settings.setValue("volume", int(self.volume_slider.value()))
+            self.settings.setValue("geometry", self.saveGeometry())
+            self.settings.setValue("isMaximized", self.isMaximized())
+        except Exception:
+            pass
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
+        self._save_settings()
+        super().closeEvent(event)
 
     # --------------- VLC ---------------
     def _attach_vlc_events(self) -> None:
@@ -466,13 +508,17 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # ------------- ファイルダイアログ -------------
     def open_files_dialog(self) -> None:
+        start_dir = self.settings.value("last_dir", os.path.expanduser("~"))
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
             "動画ファイルを選択",
-            os.path.expanduser("~"),
+            start_dir,
             "動画ファイル (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.ts *.m4v);;すべてのファイル (*.*)",
         )
         if files:
+            try:
+                self.settings.setValue("last_dir", os.path.dirname(files[0]))
+            except Exception:
+                pass
             play_first = not self.playlist
             self.add_to_playlist(files, play_first=play_first)
-

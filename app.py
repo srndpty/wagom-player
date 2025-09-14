@@ -22,6 +22,28 @@ class VlcEvents(QtCore.QObject):
     media_ended = QtCore.pyqtSignal()
 
 
+class SeekSlider(QtWidgets.QSlider):
+    """クリック位置に即ジャンプするシークスライダ"""
+    clickedValue = QtCore.pyqtSignal(int)
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == QtCore.Qt.LeftButton:
+            if self.orientation() == QtCore.Qt.Horizontal:
+                pos = event.pos().x()
+                span = max(1, self.width())
+            else:
+                pos = self.height() - event.pos().y()
+                span = max(1, self.height())
+            rng = self.maximum() - self.minimum()
+            val = self.minimum() + int(rng * pos / span)
+            val = max(self.minimum(), min(self.maximum(), val))
+            self.setValue(val)
+            self.clickedValue.emit(val)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class VideoPlayer(QtWidgets.QMainWindow):
     SEEK_SHORT_MS = 10_000
     SEEK_LONG_MS = 60_000
@@ -68,8 +90,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.video_frame.setStyleSheet("background: #000;")
         layout.addWidget(self.video_frame, 1)
 
-        # シークバー
-        self.seek_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self)
+        # シークバー（クリック位置へジャンプ）
+        self.seek_slider = SeekSlider(QtCore.Qt.Horizontal, self)
         self.seek_slider.setRange(0, 0)
         self.seek_slider.setEnabled(False)
         layout.addWidget(self.seek_slider)
@@ -85,7 +107,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_next = QtWidgets.QPushButton("次へ")
         for b in (self.btn_open, self.btn_play, self.btn_stop, self.btn_prev, self.btn_next):
             ctrl.addWidget(b)
+
+        # 右寄せスペース
         ctrl.addStretch(1)
+
+        # ボリュームバー
+        self.volume_label = QtWidgets.QLabel("音量")
+        self.volume_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setFixedWidth(140)
+        self.volume_slider.setValue(80)
+        ctrl.addWidget(self.volume_label)
+        ctrl.addWidget(self.volume_slider)
 
         self.status = self.statusBar()
         self.status.showMessage("準備完了")
@@ -99,6 +132,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.sliderPressed.connect(self._on_seek_pressed)
         self.seek_slider.sliderReleased.connect(self._on_seek_released)
         self.seek_slider.sliderMoved.connect(self._on_slider_moved)
+        self.seek_slider.clickedValue.connect(self._on_slider_clicked)
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
 
         # メニュー（簡易）
         menu = self.menuBar().addMenu("ファイル")
@@ -316,6 +351,20 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
         if total > 0:
             self.status.showMessage(f"{f(value)} / {f(total)}")
+
+    def _on_slider_clicked(self, value: int) -> None:
+        # つまみ以外の地点クリックで即シーク
+        try:
+            self.player.set_time(value)
+        except Exception:
+            pass
+
+    # ------------- 音量操作 -------------
+    def _on_volume_changed(self, value: int) -> None:
+        try:
+            self.player.audio_set_volume(int(value))
+        except Exception:
+            pass
 
     # ------------- ファイルダイアログ -------------
     def open_files_dialog(self) -> None:

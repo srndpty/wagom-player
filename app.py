@@ -408,10 +408,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             event.accept(); return
 
         if is_keypad and key == QtCore.Qt.Key_0:
-            if self.isMaximized():
-                self.showNormal()
-            else:
-                self.showMaximized()
+            # Num0 は常に最大化（トグルしない）
+            self.showMaximized()
             event.accept(); return
 
         super().keyPressEvent(event)
@@ -429,6 +427,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_up = mk(QtCore.Qt.Key_Up, lambda: self._adjust_volume(+10))
         self._sc_down = mk(QtCore.Qt.Key_Down, lambda: self._adjust_volume(-10))
         self._sc_mute = mk(QtCore.Qt.Key_M, self._toggle_mute)
+        # Num 0（テンキー0）: 常に最大化（KeypadModifierを考慮）
+        self._sc_num0 = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_0 | QtCore.Qt.KeypadModifier)), self)
+        self._sc_num0.setContext(QtCore.Qt.ApplicationShortcut)
+        self._sc_num0.activated.connect(self.showMaximized)
 
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802

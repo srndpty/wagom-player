@@ -74,6 +74,23 @@ def resource_path(*parts: str) -> str:
     return os.path.join(base, *parts)
 
 
+def apply_app_icon(app: QtWidgets.QApplication) -> QtGui.QIcon:
+    icon_path = resource_path("resources", "icons", "app.svg")
+    icon = QtGui.QIcon(icon_path)
+    app.setWindowIcon(icon)
+    return icon
+
+
+def apply_windows_app_user_model_id(app_id: str = "wagom-player") -> None:
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        pass
+
+
 class VlcEvents(QtCore.QObject):
     media_ended = QtCore.pyqtSignal()
 
@@ -600,8 +617,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
 def main(argv: List[str]) -> int:
     app = QtWidgets.QApplication(argv)
     apply_dark_theme(app)
+    apply_windows_app_user_model_id("wagom-player")
+    app_icon = apply_app_icon(app)
     files = [a for a in argv[1:] if os.path.exists(a)]
     w = VideoPlayer(files=files)
+    try:
+        w.setWindowIcon(app_icon)
+    except Exception:
+        pass
     w.show()
     return app.exec_()
 

@@ -19,6 +19,194 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.Video\shell\open\command]
 @="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
 
+; --- Per-extension ProgIDs (friendly type names with extension) ---
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp]
+@="Wagom Media (.3gp)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf]
+@="Wagom Media (.asf)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi]
+@="Wagom Media (.avi)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv]
+@="Wagom Media (.flv)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v]
+@="Wagom Media (.m4v)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv]
+@="Wagom Media (.mkv)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov]
+@="Wagom Media (.mov)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4]
+@="Wagom Media (.mp4)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg]
+@="Wagom Media (.mpeg)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg]
+@="Wagom Media (.mpg)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe]
+@="Wagom Media (.mpe)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm]
+@="Wagom Media (.rm)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb]
+@="Wagom Media (.rmvb)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts]
+@="Wagom Media (.ts)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.vob]
+@="Wagom Media (.vob)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.vob\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.vob\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.vob\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.vob\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.webm]
+@="Wagom Media (.webm)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.webm\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.webm\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.webm\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.webm\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.wmv]
+@="Wagom Media (.wmv)"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.wmv\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.wmv\shell]
+@="open"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.wmv\shell\open]
+"MultiSelectModel"="Player"
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.wmv\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
 ; Open with メニューへの掲載（Applications エントリ）
 [HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\shell\open\command]
 @="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
@@ -27,29 +215,84 @@ Windows Registry Editor Version 5.00
 "MultiSelectModel"="Player"
 
 [HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\SupportedTypes]
-".mp4"=""
-".mkv"=""
+".3gp"=""
+".asf"=""
 ".avi"=""
-".mov"=""
-".wmv"=""
 ".flv"=""
-".ts"=""
 ".m4v"=""
+".mkv"=""
+".mov"=""
+".mp4"=""
+".mpeg"=""
+".mpg"=""
+".mpe"=""
+".rm"=""
+".rmvb"=""
+".ts"=""
+".vob"=""
+".webm"=""
+".wmv"=""
+
+; --- ここから 既定のアプリ（アプリ別）に表示させるための Capabilities 登録 ---
+[HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\Capabilities]
+"ApplicationName"="wagom-player"
+"ApplicationDescription"="wagom-player video player"
+"ApplicationIcon"="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+
+[HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\Capabilities\FileAssociations]
+".3gp"="WagomPlayer.3gp"
+".asf"="WagomPlayer.asf"
+".avi"="WagomPlayer.avi"
+".flv"="WagomPlayer.flv"
+".m4v"="WagomPlayer.m4v"
+".mkv"="WagomPlayer.mkv"
+".mov"="WagomPlayer.mov"
+".mp4"="WagomPlayer.mp4"
+".mpeg"="WagomPlayer.mpeg"
+".mpg"="WagomPlayer.mpg"
+".mpe"="WagomPlayer.mpe"
+".rm"="WagomPlayer.rm"
+".rmvb"="WagomPlayer.rmvb"
+".ts"="WagomPlayer.ts"
+".vob"="WagomPlayer.vob"
+".webm"="WagomPlayer.webm"
+".wmv"="WagomPlayer.wmv"
+
+[HKEY_CURRENT_USER\Software\RegisteredApplications]
+"wagom-player"="Software\\Classes\\Applications\\wagom-player.exe\\Capabilities"
 
 ; 各拡張子の OpenWith に ProgID を関連付け（既定アプリ変更はユーザー操作が必要）
-[HKEY_CURRENT_USER\Software\Classes\.mp4\OpenWithProgids]
+[HKEY_CURRENT_USER\Software\Classes\.3gp\OpenWithProgids]
 "WagomPlayer.Video"=""
-[HKEY_CURRENT_USER\Software\Classes\.mkv\OpenWithProgids]
+[HKEY_CURRENT_USER\Software\Classes\.asf\OpenWithProgids]
 "WagomPlayer.Video"=""
 [HKEY_CURRENT_USER\Software\Classes\.avi\OpenWithProgids]
 "WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.flv\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.m4v\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.mkv\OpenWithProgids]
+"WagomPlayer.Video"=""
 [HKEY_CURRENT_USER\Software\Classes\.mov\OpenWithProgids]
 "WagomPlayer.Video"=""
-[HKEY_CURRENT_USER\Software\Classes\.wmv\OpenWithProgids]
+[HKEY_CURRENT_USER\Software\Classes\.mp4\OpenWithProgids]
 "WagomPlayer.Video"=""
-[HKEY_CURRENT_USER\Software\Classes\.flv\OpenWithProgids]
+[HKEY_CURRENT_USER\Software\Classes\.mpeg\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.mpg\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.mpe\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.rm\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.rmvb\OpenWithProgids]
 "WagomPlayer.Video"=""
 [HKEY_CURRENT_USER\Software\Classes\.ts\OpenWithProgids]
 "WagomPlayer.Video"=""
-[HKEY_CURRENT_USER\Software\Classes\.m4v\OpenWithProgids]
+[HKEY_CURRENT_USER\Software\Classes\.vob\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.webm\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.wmv\OpenWithProgids]
 "WagomPlayer.Video"=""

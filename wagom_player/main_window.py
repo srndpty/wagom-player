@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 from typing import List, Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -449,7 +450,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_repeat = mk(QtCore.Qt.Key_R, lambda: self.btn_repeat.toggle())
         # スペースキーで再生/一時停止
         self._sc_space = mk(QtCore.Qt.Key_Space, self.toggle_play)
-        
+
+        # Num 9: "_ok" フォルダに移動
+        self._sc_move_ok = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_9 | QtCore.Qt.KeypadModifier)), self)
+        self._sc_move_ok.setContext(QtCore.Qt.ApplicationShortcut)
+        self._sc_move_ok.activated.connect(lambda: self._move_current_file_and_play_next("_ok"))
+
+        # Num 6: "_ng" フォルダに移動
+        self._sc_move_ng = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_6 | QtCore.Qt.KeypadModifier)), self)
+        self._sc_move_ng.setContext(QtCore.Qt.ApplicationShortcut)
+        self._sc_move_ng.activated.connect(lambda: self._move_current_file_and_play_next("_ng"))
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
@@ -599,6 +609,71 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 pass
             play_first = not self.playlist
             self.add_to_playlist(files, play_first=play_first)
+    
+    # ------------- ファイル移動と次の動画再生 -------------
+    def _move_current_file_and_play_next(self, subfolder_name: str):
+        """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
+        # 再生中でない、またはプレイリストが空の場合は何もしない
+        if not (0 <= self.current_index < len(self.playlist)):
+            log_message("Move requested, but no file is playing.")
+            return
 
+        # --- 重要な情報を先に保存しておく ---
+        index_to_remove = self.current_index
+        current_file_path = self.playlist[index_to_remove]
+        
+        # ★★★★★ 修正の核心 ★★★★★
+        # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
+        log_message("Stopping playback to release file lock...")
+        self.stop()
+        
+        # --- ファイルパスの準備 (停止後に行っても問題ない) ---
+        file_name = os.path.basename(current_file_path)
+        source_dir = os.path.dirname(current_file_path)
+        
+        target_dir = os.path.join(source_dir, subfolder_name)
+        target_file_path = os.path.join(target_dir, file_name)
 
+        log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
+
+        # --- 移動処理 ---
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            
+            if os.path.exists(target_file_path):
+                log_message(f"File '{file_name}' already exists in target directory. Skipping move.")
+                self.status.showMessage(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
+                # ファイルが存在した場合、次の曲の再生は行わずに待機する
+                return
+
+            shutil.move(current_file_path, target_file_path)
+            self.status.showMessage(f"移動完了: {file_name} -> {subfolder_name}", 4000)
+            log_message(f"Successfully moved file to '{target_file_path}'")
+
+        except Exception as e:
+            log_message(f"Error moving file: {e}")
+            self.status.showMessage(f"ファイル移動中にエラーが発生しました: {e}", 5000)
+            # エラーが発生した場合も、次の曲の再生は行わずに待機する
+            return
+
+        # --- プレイリストの更新と次の曲の再生 ---
+        
+        # プレイリストから該当ファイルを削除
+        self.playlist.pop(index_to_remove)
+        
+        # ウィンドウタイトルの表示を更新
+        self._update_window_title()
+
+        if not self.playlist:
+            log_message("Playlist is now empty. Playback remains stopped.")
+            self.stop() # 念のため再度stopを呼び、UIを停止状態に保つ
+        else:
+            if index_to_remove >= len(self.playlist):
+                log_message("Last item in playlist was moved. Playback remains stopped.")
+                self.stop() # 最後のアイテムを消した場合も停止状態を維持
+            else:
+                # 削除したアイテムの位置に次のアイテムが来たので、同じインデックスで再生を開始
+                log_message(f"Playing next item at index {index_to_remove}.")
+                # 少しディレイを入れると、UIの応答性が良くなることがある
+                QtCore.QTimer.singleShot(50, lambda: self.play_at(index_to_remove))
 

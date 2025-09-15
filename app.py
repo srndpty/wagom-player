@@ -58,7 +58,8 @@ def main(argv: List[str]) -> int:
         files_cli = [a for a in argv[1:] if os.path.exists(a)]
         _log("secondary instance; will forward files=" + repr(files_cli))
         payload = json.dumps(files_cli).encode("utf-8")
-        for _ in range(30):  # 約1.5秒
+        forwarded = False
+        for _ in range(160):  # 約1.5秒
             sock = QtNetwork.QLocalSocket()
             sock.connectToServer(server_name, QtCore.QIODevice.WriteOnly)
             if sock.waitForConnected(100):
@@ -67,11 +68,24 @@ def main(argv: List[str]) -> int:
                     sock.flush()
                     sock.waitForBytesWritten(200)
                     _log("client forwarded files OK")
+                    forwarded = True
                 finally:
                     sock.disconnectFromServer()
                 break
             QtCore.QThread.msleep(50)
-        return 0
+        if forwarded:
+            return 0
+        # ここまで来たらサーバが存在しない可能性が高い→スタレロックを除去して一次インスタンスとして継続
+        try:
+            if hasattr(lock, "removeStaleLock"):
+                lock.removeStaleLock()
+        except Exception:
+            pass
+        # 念のためロック再取得を試みる（失敗しても続行）
+        try:
+            lock.tryLock(0)
+        except Exception:
+            pass
 
     # 最初のインスタンス: サーバを立て、後続プロセスの引数を受け取る
     try:
@@ -90,7 +104,7 @@ def main(argv: List[str]) -> int:
 
     # --- 複数選択を1つの順序にまとめるためのバッファリング ---
     pending: List[str] = []
-    flush_timer = QtCore.QTimer()
+    flush_timer = QtCore.QTimer(w)
     flush_timer.setSingleShot(True)
 
     def natural_key(path: str):
@@ -122,30 +136,57 @@ def main(argv: List[str]) -> int:
             return
         pending.extend(files_in)
         flush_timer.stop()
-        flush_timer.timeout.connect(flush_pending)
-        flush_timer.start(150)  # 少し待ってからまとめて投入
+        flush_timer.start(800)  # 少し待ってからまとめて投入（安定化）
 
-    # 起動時引数もバッファへ（Explorerが複数起動する場合に備える）
-    enqueue(files)
+    # 一度だけハンドラを接続
+    flush_timer.timeout.connect(flush_pending)
+
+    # 起動時引数はそのまま投入（%*で一括渡し時は即反映される）
+    if files:
+        files_sorted = sorted(files, key=lambda p: (os.path.dirname(p).casefold(), natural_key(p)))
+        w.add_to_playlist(files_sorted, play_first=True)
+
+    socket_buffers: dict = {}
 
     def on_new_conn() -> None:
         c = server.nextPendingConnection()
         if not c:
             return
-        def handle_ready():
-            data = bytes(c.readAll())
+        try:
+            c.setParent(server)
+        except Exception:
+            pass
+        socket_buffers[c] = bytearray()
+
+        def on_ready():
             try:
-                arr = json.loads(data.decode("utf-8"))
-                new_files = [a for a in arr if os.path.exists(a)]
-                _log("server received files=" + repr(new_files))
-                if new_files:
-                    enqueue(new_files)
-                    w.showNormal(); w.raise_(); w.activateWindow()
+                socket_buffers[c] += bytes(c.readAll())
             except Exception:
                 pass
-            finally:
-                c.disconnectFromServer()
-        c.readyRead.connect(handle_ready)
+
+        def on_done():
+            # 切断直前に届いた未処理データも取り込む
+            try:
+                socket_buffers[c] += bytes(c.readAll())
+            except Exception:
+                pass
+            data = socket_buffers.pop(c, b"")
+            try:
+                arr = json.loads(bytes(data).decode("utf-8", errors="ignore")) if data else []
+            except Exception:
+                arr = []
+            new_files = [a for a in arr if os.path.exists(a)]
+            _log("server received files=" + repr(new_files))
+            if new_files:
+                enqueue(new_files)
+                w.showNormal(); w.raise_(); w.activateWindow()
+            try:
+                c.deleteLater()
+            except Exception:
+                pass
+
+        c.readyRead.connect(on_ready)
+        c.disconnected.connect(on_done)
 
     server.newConnection.connect(on_new_conn)
 
@@ -154,3 +195,5 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))
+
+

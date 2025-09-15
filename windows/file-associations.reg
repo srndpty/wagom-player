@@ -1,0 +1,55 @@
+Windows Registry Editor Version 5.00
+
+; 注意: 実際の exe の絶対パスに書き換えてから使用してください。
+; 例: C:\\Program Files\\wagom-player\\wagom-player.exe
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.Video]
+@="Wagom Player Video"
+"FriendlyAppName"="wagom-player"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.Video\DefaultIcon]
+@="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.Video\shell]
+@="open"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.Video\shell\open]
+"MultiSelectModel"="Player"
+
+[HKEY_CURRENT_USER\Software\Classes\WagomPlayer.Video\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+; Open with メニューへの掲載（Applications エントリ）
+[HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+
+[HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\shell\open]
+"MultiSelectModel"="Player"
+
+[HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\SupportedTypes]
+".mp4"=""
+".mkv"=""
+".avi"=""
+".mov"=""
+".wmv"=""
+".flv"=""
+".ts"=""
+".m4v"=""
+
+; 各拡張子の OpenWith に ProgID を関連付け（既定アプリ変更はユーザー操作が必要）
+[HKEY_CURRENT_USER\Software\Classes\.mp4\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.mkv\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.avi\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.mov\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.wmv\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.flv\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.ts\OpenWithProgids]
+"WagomPlayer.Video"=""
+[HKEY_CURRENT_USER\Software\Classes\.m4v\OpenWithProgids]
+"WagomPlayer.Video"=""

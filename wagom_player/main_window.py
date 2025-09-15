@@ -391,10 +391,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
         mods = event.modifiers()
         is_keypad = bool(mods & QtCore.Qt.KeypadModifier)
 
-        if key == QtCore.Qt.Key_Space:
-            self.toggle_play()
-            event.accept(); return
-
         if key == QtCore.Qt.Key_Left:
             self.seek_by(-self.SEEK_SHORT_MS)
             event.accept(); return
@@ -451,7 +447,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_next_track = mk(QtCore.Qt.Key_PageDown, self.play_next)
         # Rキーでリピート切替（任意）
         self._sc_repeat = mk(QtCore.Qt.Key_R, lambda: self.btn_repeat.toggle())
-
+        # スペースキーで再生/一時停止
+        self._sc_space = mk(QtCore.Qt.Key_Space, self.toggle_play)
+        
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():

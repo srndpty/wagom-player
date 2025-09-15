@@ -13,6 +13,14 @@ from wagom_player.theme import apply_dark_theme, apply_app_icon, apply_windows_a
 from wagom_player.main_window import VideoPlayer
 
 # --- ユーティリティ関数 ---
+import time
+
+# ログメッセージ関数を一時的にオーバーライドしてPIDとタイムスタンプを追加
+original_log_message = log_message
+def log_message(msg):
+    pid = os.getpid()
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    original_log_message(f"[{timestamp}][PID:{pid:5d}] {msg}")
 
 def natural_key(path: str):
     """ファイル名を自然順ソートするためのキーを生成する (例: 2.mp4 < 10.mp4)"""
@@ -51,10 +59,12 @@ def main(argv: List[str]) -> int:
     # 自分に渡されたファイル引数をIPCファイルに追記する
     files_to_send = [a for a in argv[1:] if os.path.exists(a)]
     if files_to_send:
+        log_message(f"Instance started with {len(files_to_send)} file(s). Attempting to write to IPC.")
         try:
             with open(ipc_file_path, "a", encoding='utf-8') as f:
                 for path in files_to_send:
                     f.write(path + "\n")
+            log_message("Successfully wrote to IPC file.")
         except (IOError, OSError) as e:
             # ここで失敗しても致命的ではないのでログに残すだけ
             log_message(f"Process could not write to IPC file: {e}")
@@ -63,6 +73,7 @@ def main(argv: List[str]) -> int:
     lock_file = QtCore.QLockFile(lock_path)
     lock_file.setStaleLockTime(0)
 
+    log_message("Attempting to acquire lock...")
     if lock_file.tryLock(100):
         #
         # --- プライマリインスタンスの処理 ---
@@ -83,7 +94,7 @@ def main(argv: List[str]) -> int:
             if not pending_files: return
             
             # (この関数の中身は変更なし)
-            log_message(f"Flushing {len(pending_files)} files...")
+            log_message(f"FLUSH: Timer fired. Processing {len(pending_files)} pending files.")
             current_playlist = player_window.playlist
             current_playlist_set = set(p.casefold() for p in current_playlist)
             unique_files = []
@@ -123,6 +134,7 @@ def main(argv: List[str]) -> int:
             if not os.path.exists(ipc_file_path): return
             
             try:
+                log_message("IPC: Watcher triggered or initial call. Reading IPC file...")
                 with open(ipc_file_path, "r+", encoding='utf-8') as f:
                     lines = [line.strip() for line in f if line.strip()]
                     if lines:
@@ -135,7 +147,10 @@ def main(argv: List[str]) -> int:
                         nonlocal pending_files
                         if valid_files:
                             pending_files.extend(valid_files)
+                            log_message(f"IPC: Added {len(valid_files)} files to queue. Total pending: {len(pending_files)}. Restarting flush timer.")
                             flush_timer.start() # タイマーを起動/再起動
+                    else:
+                        log_message("IPC: File was empty.")
             except (IOError, OSError) as e:
                  log_message(f"Error processing IPC file: {e}")
 
@@ -143,9 +158,12 @@ def main(argv: List[str]) -> int:
         file_watcher = QtCore.QFileSystemWatcher([ipc_file_path])
         file_watcher.fileChanged.connect(process_ipc_file)
 
-        # ★★★ 新ロジック Step 4: 起動時に一度だけIPCファイルを処理する ★★★
-        # これで自分自身が書き込んだファイルも含め、全プロセス分を読み込める
-        process_ipc_file()
+        # ★★★ 修正ロジック: 起動直後に短いディレイを挟んでから初回処理を行う ★★★
+        # これにより、同時に起動された他のプロセスがIPCファイルに書き込む時間を確保する。
+        # 以前の process_ipc_file() の直接呼び出しをこのタイマーに置き換える。
+        # 150ミリ秒もあれば、ほとんどのケースで全プロセスが書き込みを完了できるはず。
+        QtCore.QTimer.singleShot(150, process_ipc_file)
+        # process_ipc_file()
         
         # もしIPCファイルが空で、何も処理が始まらなかった場合の保険
         if not pending_files:

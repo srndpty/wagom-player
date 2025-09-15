@@ -55,7 +55,11 @@ def apply_dark_theme(app: QtWidgets.QApplication) -> None:
 
 def resource_path(*parts: str) -> str:
     base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(os.path.dirname(base), *parts) if parts and parts[0] == "resources" else os.path.join(base, *parts)
+    return (
+        os.path.join(os.path.dirname(base), *parts)
+        if parts and parts[0] == "resources"
+        else os.path.join(base, *parts)
+    )
 
 
 def apply_app_icon(app: QtWidgets.QApplication) -> QtGui.QIcon:
@@ -70,7 +74,7 @@ def apply_windows_app_user_model_id(app_id: str = "wagom-player") -> None:
         return
     try:
         import ctypes
+
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
     except Exception:
         pass
-

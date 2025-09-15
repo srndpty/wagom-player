@@ -40,4 +40,3 @@ if __name__ == "__main__":
     ico = base / "resources" / "icons" / "app.ico"
     svg_to_ico(svg, ico)
     print(f"[i] ICO generated at: {ico}")
-

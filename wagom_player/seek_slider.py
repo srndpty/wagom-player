@@ -28,7 +28,8 @@ class SeekSlider(QtWidgets.QSlider):
             except Exception:
                 pass
             self.clickedValue.emit(val)
-            event.accept(); return
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
@@ -40,7 +41,8 @@ class SeekSlider(QtWidgets.QSlider):
                     self.sliderMoved.emit(val)
                 except Exception:
                     pass
-            event.accept(); return
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
@@ -50,6 +52,6 @@ class SeekSlider(QtWidgets.QSlider):
                 self.sliderReleased.emit()
             except Exception:
                 pass
-            event.accept(); return
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
-

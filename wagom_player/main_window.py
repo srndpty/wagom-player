@@ -12,7 +12,9 @@ from .logger import log_message
 try:
     import vlc
 except ImportError as e:
-    raise SystemExit("python-vlc が見つかりません。`pip install python-vlc` を実行してください") from e
+    raise SystemExit(
+        "python-vlc が見つかりません。`pip install python-vlc` を実行してください"
+    ) from e
 
 
 def _create_vlc_instance() -> "vlc.Instance":
@@ -70,7 +72,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         try:
             m = self.player.audio_get_mute()
             if m in (0, 1):
-                self._muted = (m == 1)
+                self._muted = m == 1
         except Exception:
             pass
         self._update_volume_label()
@@ -111,7 +113,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_next = QtWidgets.QPushButton()
         self.btn_repeat = QtWidgets.QPushButton()
         self.btn_repeat.setCheckable(True)
-        for b in (self.btn_open, self.btn_play, self.btn_stop, self.btn_prev, self.btn_next, self.btn_repeat):
+        for b in (
+            self.btn_open,
+            self.btn_play,
+            self.btn_stop,
+            self.btn_prev,
+            self.btn_next,
+            self.btn_repeat,
+        ):
             ctrl.addWidget(b)
         ctrl.addStretch(1)
 
@@ -164,10 +173,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
             btn.setFixedSize(36, 28)
             btn.setIconSize(QtCore.QSize(18, 18))
 
-        style_btn(self.btn_open, resource_path("resources", "icons", "open.svg"), "開く")
-        style_btn(self.btn_stop, resource_path("resources", "icons", "stop.svg"), "停止")
-        style_btn(self.btn_prev, resource_path("resources", "icons", "prev.svg"), "前へ")
-        style_btn(self.btn_next, resource_path("resources", "icons", "next.svg"), "次へ")
+        style_btn(
+            self.btn_open, resource_path("resources", "icons", "open.svg"), "開く"
+        )
+        style_btn(
+            self.btn_stop, resource_path("resources", "icons", "stop.svg"), "停止"
+        )
+        style_btn(
+            self.btn_prev, resource_path("resources", "icons", "prev.svg"), "前へ"
+        )
+        style_btn(
+            self.btn_next, resource_path("resources", "icons", "next.svg"), "次へ"
+        )
 
         self._icon_play = QtGui.QIcon(resource_path("resources", "icons", "play.svg"))
         self._icon_pause = QtGui.QIcon(resource_path("resources", "icons", "pause.svg"))
@@ -176,13 +193,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._last_playing_state: Optional[bool] = None
         self._update_play_button()
         # 音量アイコン
-        self._icon_volume = QtGui.QIcon(resource_path("resources", "icons", "volume.svg"))
+        self._icon_volume = QtGui.QIcon(
+            resource_path("resources", "icons", "volume.svg")
+        )
         self._icon_mute = QtGui.QIcon(resource_path("resources", "icons", "mute.svg"))
         if hasattr(self, "volume_icon"):
             self.volume_icon.setPixmap((self._icon_volume).pixmap(18, 18))
         # リピートアイコン
-        self._icon_repeat_on = QtGui.QIcon(resource_path("resources", "icons", "repeat.svg"))
-        self._icon_repeat_off = QtGui.QIcon(resource_path("resources", "icons", "repeat_off.svg"))
+        self._icon_repeat_on = QtGui.QIcon(
+            resource_path("resources", "icons", "repeat.svg")
+        )
+        self._icon_repeat_off = QtGui.QIcon(
+            resource_path("resources", "icons", "repeat_off.svg")
+        )
         self.btn_repeat.setFixedSize(36, 28)
         self.btn_repeat.setIconSize(QtCore.QSize(18, 18))
         self.btn_repeat.setToolTip("リピート再生")
@@ -199,12 +222,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         try:
             import ctypes
+
             hwnd = int(self.winId())
             dwmapi = ctypes.windll.dwmapi
             value = ctypes.c_int(1)
             for attr in (20, 19):
                 try:
-                    dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), ctypes.c_int(attr), ctypes.byref(value), ctypes.sizeof(value))
+                    dwmapi.DwmSetWindowAttribute(
+                        ctypes.c_void_p(hwnd),
+                        ctypes.c_int(attr),
+                        ctypes.byref(value),
+                        ctypes.sizeof(value),
+                    )
                 except Exception:
                     pass
         except Exception:
@@ -315,7 +344,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
             pass
         if play_first:
             self.play_at(start_index)
-        log_message(f"add_to_playlist called with {len(files)} files. play_first={play_first}")
+        log_message(
+            f"add_to_playlist called with {len(files)} files. play_first={play_first}"
+        )
 
     def play_at(self, index: int) -> None:
         if not (0 <= index < len(self.playlist)):
@@ -394,35 +425,43 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         if key == QtCore.Qt.Key_Left:
             self.seek_by(-self.SEEK_SHORT_MS)
-            event.accept(); return
+            event.accept()
+            return
         if key == QtCore.Qt.Key_Right:
             self.seek_by(self.SEEK_SHORT_MS)
-            event.accept(); return
+            event.accept()
+            return
 
         if is_keypad and key == QtCore.Qt.Key_4:
             # Num4: 60秒進む
             self.seek_by(self.SEEK_LONG_MS)
-            event.accept(); return
+            event.accept()
+            return
         if is_keypad and key == QtCore.Qt.Key_1:
             # Num1: 60秒戻る
             self.seek_by(-self.SEEK_LONG_MS)
-            event.accept(); return
+            event.accept()
+            return
 
         if key == QtCore.Qt.Key_PageUp:
             self.play_previous()
-            event.accept(); return
+            event.accept()
+            return
         if key == QtCore.Qt.Key_PageDown:
             self.play_next()
-            event.accept(); return
+            event.accept()
+            return
 
         if is_keypad and key == QtCore.Qt.Key_8:
             self.close()
-            event.accept(); return
+            event.accept()
+            return
 
         if is_keypad and key == QtCore.Qt.Key_0:
             # Num0 は常に最大化
             self.showMaximized()
-            event.accept(); return
+            event.accept()
+            return
 
         super().keyPressEvent(event)
 
@@ -434,13 +473,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
             sc.activated.connect(handler)
             return sc
 
-        self._sc_left = mk(QtCore.Qt.Key_Left, lambda: self.seek_by(-self.SEEK_SHORT_MS))
-        self._sc_right = mk(QtCore.Qt.Key_Right, lambda: self.seek_by(self.SEEK_SHORT_MS))
+        self._sc_left = mk(
+            QtCore.Qt.Key_Left, lambda: self.seek_by(-self.SEEK_SHORT_MS)
+        )
+        self._sc_right = mk(
+            QtCore.Qt.Key_Right, lambda: self.seek_by(self.SEEK_SHORT_MS)
+        )
         self._sc_up = mk(QtCore.Qt.Key_Up, lambda: self._adjust_volume(+10))
         self._sc_down = mk(QtCore.Qt.Key_Down, lambda: self._adjust_volume(-10))
         self._sc_mute = mk(QtCore.Qt.Key_M, self._toggle_mute)
         # Num 0（テンキー0）
-        self._sc_num0 = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_0 | QtCore.Qt.KeypadModifier)), self)
+        self._sc_num0 = QtWidgets.QShortcut(
+            QtGui.QKeySequence(int(QtCore.Qt.Key_0 | QtCore.Qt.KeypadModifier)), self
+        )
         self._sc_num0.setContext(QtCore.Qt.ApplicationShortcut)
         self._sc_num0.activated.connect(self.showMaximized)
         # 前/次動画
@@ -452,14 +497,23 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_space = mk(QtCore.Qt.Key_Space, self.toggle_play)
 
         # Num 9: "_ok" フォルダに移動
-        self._sc_move_ok = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_9 | QtCore.Qt.KeypadModifier)), self)
+        self._sc_move_ok = QtWidgets.QShortcut(
+            QtGui.QKeySequence(int(QtCore.Qt.Key_9 | QtCore.Qt.KeypadModifier)), self
+        )
         self._sc_move_ok.setContext(QtCore.Qt.ApplicationShortcut)
-        self._sc_move_ok.activated.connect(lambda: self._move_current_file_and_play_next("_ok"))
+        self._sc_move_ok.activated.connect(
+            lambda: self._move_current_file_and_play_next("_ok")
+        )
 
         # Num 6: "_ng" フォルダに移動
-        self._sc_move_ng = QtWidgets.QShortcut(QtGui.QKeySequence(int(QtCore.Qt.Key_6 | QtCore.Qt.KeypadModifier)), self)
+        self._sc_move_ng = QtWidgets.QShortcut(
+            QtGui.QKeySequence(int(QtCore.Qt.Key_6 | QtCore.Qt.KeypadModifier)), self
+        )
         self._sc_move_ng.setContext(QtCore.Qt.ApplicationShortcut)
-        self._sc_move_ng.activated.connect(lambda: self._move_current_file_and_play_next("_ng"))
+        self._sc_move_ng.activated.connect(
+            lambda: self._move_current_file_and_play_next("_ng")
+        )
+
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
@@ -481,6 +535,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         cur = self.player.get_time()
         total = self.player.get_length()
+
         def f(ms: int) -> str:
             if ms <= 0:
                 return "00:00"
@@ -488,6 +543,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             m, s = divmod(s, 60)
             h, m = divmod(m, 60)
             return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
         if cur >= 0 and total > 0:
             self.status.showMessage(f"{f(cur)} / {f(total)}")
             if total != self._media_length:
@@ -504,7 +560,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._update_play_button()
 
     def _update_window_title(self, filename: Optional[str] = None) -> None:
-        name = filename or (os.path.basename(self.playlist[self.current_index]) if 0 <= self.current_index < len(self.playlist) else "")
+        name = filename or (
+            os.path.basename(self.playlist[self.current_index])
+            if 0 <= self.current_index < len(self.playlist)
+            else ""
+        )
         idx = (self.current_index + 1) if self.current_index >= 0 else 0
         total = len(self.playlist)
         prefix = f"[{idx}/{total}] " if total else ""
@@ -515,7 +575,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
             playing = bool(self.player.is_playing())
         except Exception:
             playing = False
-        if getattr(self, "_last_playing_state", None) is None or self._last_playing_state != playing:
+        if (
+            getattr(self, "_last_playing_state", None) is None
+            or self._last_playing_state != playing
+        ):
             self.btn_play.setIcon(self._icon_pause if playing else self._icon_play)
             self.btn_play.setToolTip("一時停止" if playing else "再生")
             self._last_playing_state = playing
@@ -533,7 +596,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
             pass
 
     def _on_slider_moved(self, value: int) -> None:
-        total = self._media_length if self._media_length > 0 else self.player.get_length()
+        total = (
+            self._media_length if self._media_length > 0 else self.player.get_length()
+        )
+
         def f(ms: int) -> str:
             if ms <= 0:
                 return "00:00"
@@ -541,6 +607,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             m, s = divmod(s, 60)
             h, m = divmod(m, 60)
             return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
         if total > 0:
             self.status.showMessage(f"{f(value)} / {f(total)}")
 
@@ -581,7 +648,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._update_repeat_button()
 
     def _update_repeat_button(self) -> None:
-        self.btn_repeat.setIcon(self._icon_repeat_on if self.repeat_enabled else self._icon_repeat_off)
+        self.btn_repeat.setIcon(
+            self._icon_repeat_on if self.repeat_enabled else self._icon_repeat_off
+        )
         # 押下状態の視覚フィードバック
         self.btn_repeat.setChecked(self.repeat_enabled)
 
@@ -609,7 +678,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 pass
             play_first = not self.playlist
             self.add_to_playlist(files, play_first=play_first)
-    
+
     # ------------- ファイル移動と次の動画再生 -------------
     def _move_current_file_and_play_next(self, subfolder_name: str):
         """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
@@ -621,16 +690,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # --- 重要な情報を先に保存しておく ---
         index_to_remove = self.current_index
         current_file_path = self.playlist[index_to_remove]
-        
+
         # ★★★★★ 修正の核心 ★★★★★
         # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
         log_message("Stopping playback to release file lock...")
         self.stop()
-        
+
         # --- ファイルパスの準備 (停止後に行っても問題ない) ---
         file_name = os.path.basename(current_file_path)
         source_dir = os.path.dirname(current_file_path)
-        
+
         target_dir = os.path.join(source_dir, subfolder_name)
         target_file_path = os.path.join(target_dir, file_name)
 
@@ -639,10 +708,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # --- 移動処理 ---
         try:
             os.makedirs(target_dir, exist_ok=True)
-            
+
             if os.path.exists(target_file_path):
-                log_message(f"File '{file_name}' already exists in target directory. Skipping move.")
-                self.status.showMessage(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
+                log_message(
+                    f"File '{file_name}' already exists in target directory. Skipping move."
+                )
+                self.status.showMessage(
+                    f"移動失敗: {file_name}は移動先に既に存在します", 5000
+                )
                 # ファイルが存在した場合、次の曲の再生は行わずに待機する
                 return
 
@@ -657,23 +730,24 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
 
         # --- プレイリストの更新と次の曲の再生 ---
-        
+
         # プレイリストから該当ファイルを削除
         self.playlist.pop(index_to_remove)
-        
+
         # ウィンドウタイトルの表示を更新
         self._update_window_title()
 
         if not self.playlist:
             log_message("Playlist is now empty. Playback remains stopped.")
-            self.stop() # 念のため再度stopを呼び、UIを停止状態に保つ
+            self.stop()  # 念のため再度stopを呼び、UIを停止状態に保つ
         else:
             if index_to_remove >= len(self.playlist):
-                log_message("Last item in playlist was moved. Playback remains stopped.")
-                self.stop() # 最後のアイテムを消した場合も停止状態を維持
+                log_message(
+                    "Last item in playlist was moved. Playback remains stopped."
+                )
+                self.stop()  # 最後のアイテムを消した場合も停止状態を維持
             else:
                 # 削除したアイテムの位置に次のアイテムが来たので、同じインデックスで再生を開始
                 log_message(f"Playing next item at index {index_to_remove}.")
                 # 少しディレイを入れると、UIの応答性が良くなることがある
                 QtCore.QTimer.singleShot(50, lambda: self.play_at(index_to_remove))
-

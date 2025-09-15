@@ -3,4 +3,3 @@ __all__ = [
     "seek_slider",
     "main_window",
 ]
-

@@ -17,7 +17,7 @@ Windows Registry Editor Version 5.00
 "MultiSelectModel"="Player"
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.Video\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 ; --- Per-extension ProgIDs (friendly type names with extension) ---
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3g2]
@@ -29,7 +29,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3g2\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3g2\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp]
 @="Wagom Media (.3gp)"
@@ -40,7 +40,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.3gp\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf]
 @="Wagom Media (.asf)"
@@ -51,7 +51,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.asf\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi]
 @="Wagom Media (.avi)"
@@ -62,7 +62,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.avi\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv]
 @="Wagom Media (.flv)"
@@ -73,7 +73,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.flv\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v]
 @="Wagom Media (.m4v)"
@@ -84,7 +84,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.m4v\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv]
 @="Wagom Media (.mkv)"
@@ -95,7 +95,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mkv\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov]
 @="Wagom Media (.mov)"
@@ -106,7 +106,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mov\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4]
 @="Wagom Media (.mp4)"
@@ -117,7 +117,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mp4\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg]
 @="Wagom Media (.mpeg)"
@@ -128,7 +128,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpeg\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg]
 @="Wagom Media (.mpg)"
@@ -139,7 +139,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpg\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe]
 @="Wagom Media (.mpe)"
@@ -150,7 +150,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.mpe\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm]
 @="Wagom Media (.rm)"
@@ -161,7 +161,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rm\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb]
 @="Wagom Media (.rmvb)"
@@ -172,7 +172,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.rmvb\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts]
 @="Wagom Media (.ts)"
@@ -183,7 +183,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts\shell\open]
 "MultiSelectModel"="Player"
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.ts\shell\open\command]
-@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" %*"
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\WagomPlayer.vob]
 @="Wagom Media (.vob)"
@@ -252,24 +252,24 @@ Windows Registry Editor Version 5.00
 "ApplicationIcon"="C:\\Program Files\\wagom-player\\wagom-player.exe,0"
 
 [HKEY_CURRENT_USER\Software\Classes\Applications\wagom-player.exe\Capabilities\FileAssociations]
-".3g2"="Applications\\wagom-player.exe"
-".3gp"="Applications\\wagom-player.exe"
-".asf"="Applications\\wagom-player.exe"
-".avi"="Applications\\wagom-player.exe"
-".flv"="Applications\\wagom-player.exe"
-".m4v"="Applications\\wagom-player.exe"
-".mkv"="Applications\\wagom-player.exe"
-".mov"="Applications\\wagom-player.exe"
-".mp4"="Applications\\wagom-player.exe"
-".mpeg"="Applications\\wagom-player.exe"
-".mpg"="Applications\\wagom-player.exe"
-".mpe"="Applications\\wagom-player.exe"
-".rm"="Applications\\wagom-player.exe"
-".rmvb"="Applications\\wagom-player.exe"
-".ts"="Applications\\wagom-player.exe"
-".vob"="Applications\\wagom-player.exe"
-".webm"="Applications\\wagom-player.exe"
-".wmv"="Applications\\wagom-player.exe"
+".3g2"="WagomPlayer.3g2"
+".3gp"="WagomPlayer.3gp"
+".asf"="WagomPlayer.asf"
+".avi"="WagomPlayer.avi"
+".flv"="WagomPlayer.flv"
+".m4v"="WagomPlayer.m4v"
+".mkv"="WagomPlayer.mkv"
+".mov"="WagomPlayer.mov"
+".mp4"="WagomPlayer.mp4"
+".mpeg"="WagomPlayer.mpeg"
+".mpg"="WagomPlayer.mpg"
+".mpe"="WagomPlayer.mpe"
+".rm"="WagomPlayer.rm"
+".rmvb"="WagomPlayer.rmvb"
+".ts"="WagomPlayer.ts"
+".vob"="WagomPlayer.vob"
+".webm"="WagomPlayer.webm"
+".wmv"="WagomPlayer.wmv"
 
 [HKEY_CURRENT_USER\Software\RegisteredApplications]
 "wagom-player"="Software\\Classes\\Applications\\wagom-player.exe\\Capabilities"
@@ -293,7 +293,6 @@ Windows Registry Editor Version 5.00
 "WagomPlayer.Video"=""
 [HKEY_CURRENT_USER\Software\Classes\.mp4\OpenWithProgids]
 "WagomPlayer.Video"=""
-"Applications\\wagom-player.exe"=""
 [HKEY_CURRENT_USER\Software\Classes\.mpeg\OpenWithProgids]
 "WagomPlayer.Video"=""
 [HKEY_CURRENT_USER\Software\Classes\.mpg\OpenWithProgids]
@@ -312,5 +311,3 @@ Windows Registry Editor Version 5.00
 "WagomPlayer.Video"=""
 [HKEY_CURRENT_USER\Software\Classes\.wmv\OpenWithProgids]
 "WagomPlayer.Video"=""
-
-

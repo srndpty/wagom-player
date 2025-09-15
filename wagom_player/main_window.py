@@ -6,6 +6,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .seek_slider import SeekSlider
 from .theme import resource_path
+from .logger import log_message
 
 try:
     import vlc
@@ -313,6 +314,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             pass
         if play_first:
             self.play_at(start_index)
+        log_message(f"add_to_playlist called with {len(files)} files. play_first={play_first}")
 
     def play_at(self, index: int) -> None:
         if not (0 <= index < len(self.playlist)):

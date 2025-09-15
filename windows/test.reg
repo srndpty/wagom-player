@@ -1,0 +1,4 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\WagomPlayer.mp4\shell\open\command]
+@="\"C:\\Program Files\\wagom-player\\wagom-player.exe\" \"%*\""

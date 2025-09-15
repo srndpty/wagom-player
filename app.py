@@ -2,198 +2,202 @@ import os
 import sys
 import json
 import getpass
+import re
 from datetime import datetime
 from typing import List
 
 from PyQt5 import QtWidgets, QtCore, QtNetwork
-import re
 
+from wagom_player.logger import log_message
 from wagom_player.theme import apply_dark_theme, apply_app_icon, apply_windows_app_user_model_id
 from wagom_player.main_window import VideoPlayer
 
+# --- ユーティリティ関数 ---
 
+def natural_key(path: str):
+    """ファイル名を自然順ソートするためのキーを生成する (例: 2.mp4 < 10.mp4)"""
+    name = os.path.basename(path)
+    parts = re.split(r'(\d+)', name)
+    return [int(p) if p.isdigit() else p.casefold() for p in parts]
+
+# --- メイン処理 ---
+def main_wrapper(argv: List[str]) -> int:
+    try:
+        main(argv)
+        return 0
+    except Exception as e:
+        import traceback
+        log_message("!!!!!!!!!! UNHANDLED EXCEPTION !!!!!!!!!!")
+        log_message(traceback.format_exc())
+        # エラーダイアログを表示するなどの処理
+        return 1
+    
 def main(argv: List[str]) -> int:
+    # --- 基本的なアプリケーション設定 ---
     app = QtWidgets.QApplication(argv)
-    # QSettings 用の識別子
     QtCore.QCoreApplication.setOrganizationName("wagom")
     QtCore.QCoreApplication.setApplicationName("wagom-player")
     apply_dark_theme(app)
     apply_windows_app_user_model_id("wagom-player")
     icon = apply_app_icon(app)
 
-    # 簡易ログ（LocalAppData配下）
-    def _log(msg: str) -> None:
-        try:
-            base = os.path.join(os.getenv("LOCALAPPDATA", ""), "wagom-player", "logs")
-            if base:
-                os.makedirs(base, exist_ok=True)
-                with open(os.path.join(base, "last-run.txt"), "a", encoding="utf-8", errors="ignore") as f:
-                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    f.write(f"[{ts}] {msg}\n")
-        except Exception:
-            pass
+    log_message("argv=" + repr(argv))
 
-    _log("argv=" + repr(argv))
+    # --- 単一インスタンス制御 (ファイルベースIPC) ---
+    temp_dir = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.TempLocation)
+    user_id = getpass.getuser()
+    lock_path = os.path.join(temp_dir, f"wagom-player-{user_id}.lock")
+    ipc_file_path = os.path.join(temp_dir, f"wagom-player-{user_id}.ipc")
 
-    # 単一インスタンス: 既存インスタンスがいれば引数を送って終了
-    server_name = f"wagom-player-{getpass.getuser()}"
+    lock_file = QtCore.QLockFile(lock_path)
+    lock_file.setStaleLockTime(0)
 
-    # 単一インスタンス制御: QLockFileで競合を防止
-    la = os.getenv("LOCALAPPDATA", "") or os.path.expanduser("~")
-    lock_dir = os.path.join(la, "wagom-player")
-    try:
-        os.makedirs(lock_dir, exist_ok=True)
-    except Exception:
-        pass
-    lock_path = os.path.join(lock_dir, "instance.lock")
-    lock = QtCore.QLockFile(lock_path)
-    try:
-        lock.setStaleLockTime(5000)  # 5秒で陳腐化
-    except Exception:
-        pass
+    # <<< 決定的なプライマリ/セカンダリの分岐 >>>
+    if lock_file.tryLock(100):
+        #
+        # --- プライマリインスタンスの処理 ---
+        #
+        log_message("Primary instance: Lock acquired. Starting.")
 
-    # すでに他インスタンスがロックを保持しているなら、既存サーバへ送って終了
-    if not lock.tryLock(1):
-        # サーバ起動待ちのレースを考慮し、短時間リトライ
-        files_cli = [a for a in argv[1:] if os.path.exists(a)]
-        _log("secondary instance; will forward files=" + repr(files_cli))
-        payload = json.dumps(files_cli).encode("utf-8")
-        forwarded = False
-        for _ in range(160):  # 約1.5秒
-            sock = QtNetwork.QLocalSocket()
-            sock.connectToServer(server_name, QtCore.QIODevice.WriteOnly)
-            if sock.waitForConnected(100):
-                try:
-                    sock.write(payload)
-                    sock.flush()
-                    sock.waitForBytesWritten(200)
-                    _log("client forwarded files OK")
-                    forwarded = True
-                finally:
-                    sock.disconnectFromServer()
-                break
-            QtCore.QThread.msleep(50)
-        if forwarded:
-            return 0
-        # ここまで来たらサーバが存在しない可能性が高い→スタレロックを除去して一次インスタンスとして継続
-        try:
-            if hasattr(lock, "removeStaleLock"):
-                lock.removeStaleLock()
-        except Exception:
-            pass
-        # 念のためロック再取得を試みる（失敗しても続行）
-        try:
-            lock.tryLock(0)
-        except Exception:
-            pass
-
-    # 最初のインスタンス: サーバを立て、後続プロセスの引数を受け取る
-    try:
-        QtNetwork.QLocalServer.removeServer(server_name)
-    except Exception:
-        pass
-
-    files = [a for a in argv[1:] if os.path.exists(a)]
-    _log("first instance files=" + repr(files))
-    w = VideoPlayer(files=[])  # 初期は待機し、後でまとめて投入
-    w.setWindowIcon(icon)
-    w.show()
-
-    server = QtNetwork.QLocalServer()
-    server.listen(server_name)
-
-    # --- 複数選択を1つの順序にまとめるためのバッファリング ---
-    pending: List[str] = []
-    flush_timer = QtCore.QTimer(w)
-    flush_timer.setSingleShot(True)
-
-    def natural_key(path: str):
-        name = os.path.basename(path)
-        parts = re.split(r"(\d+)", name)
-        return [int(p) if p.isdigit() else p.casefold() for p in parts]
-
-    def flush_pending():
-        nonlocal pending
-        if not pending:
-            return
-        # 重複排除しつつ決定的順序へ（同一フォルダ内は自然順、異なるフォルダはフォルダ名→ファイル名）
-        uniq = []
-        seen = set(x.casefold() for x in w.playlist)  # 既存分は重複追加しない
-        for p in pending:
-            cf = p.casefold()
-            if cf not in seen:
-                uniq.append(p)
-                seen.add(cf)
-        uniq.sort(key=lambda p: (os.path.dirname(p).casefold(), natural_key(p)))
-        play_first = not getattr(w, "playlist", [])
-        if uniq:
-            w.add_to_playlist(uniq, play_first=play_first)
-        pending = []
-
-    def enqueue(files_in: List[str]):
-        nonlocal pending
-        if not files_in:
-            return
-        pending.extend(files_in)
-        flush_timer.stop()
-        flush_timer.start(800)  # 少し待ってからまとめて投入（安定化）
-
-    # 一度だけハンドラを接続
-    flush_timer.timeout.connect(flush_pending)
-
-    # 起動時引数はそのまま投入（%*で一括渡し時は即反映される）
-    if files:
-        files_sorted = sorted(files, key=lambda p: (os.path.dirname(p).casefold(), natural_key(p)))
-        w.add_to_playlist(files_sorted, play_first=True)
-
-    socket_buffers: dict = {}
-
-    def on_new_conn() -> None:
-        c = server.nextPendingConnection()
-        if not c:
-            return
-        try:
-            c.setParent(server)
-        except Exception:
-            pass
-        socket_buffers[c] = bytearray()
-
-        def on_ready():
+        # 起動時に既存のIPCファイルをクリア
+        if os.path.exists(ipc_file_path):
             try:
-                socket_buffers[c] += bytes(c.readAll())
-            except Exception:
+                os.remove(ipc_file_path)
+            except OSError:
                 pass
 
-        def on_done():
-            # 切断直前に届いた未処理データも取り込む
+        # メインウィンドウとプレイリスト処理の準備
+        player_window = VideoPlayer(files=[])
+        player_window.setWindowIcon(icon)
+        player_window.show()
+
+        pending_files: List[str] = []
+        flush_timer = QtCore.QTimer(player_window)
+        flush_timer.setSingleShot(True)
+        flush_timer.setInterval(300) # 少し長めに設定
+
+        # flush_pending_filesを、診断ログを大量に追加した最終バージョンに置き換える
+        def flush_pending_files():
+            nonlocal pending_files
+            if not pending_files: return
+
+            log_message(f"--- Flush sequence started with {len(pending_files)} pending files. ---")
+
             try:
-                socket_buffers[c] += bytes(c.readAll())
-            except Exception:
-                pass
-            data = socket_buffers.pop(c, b"")
+                # --- 容疑箇所 1: プレイリスト取得 ---
+                log_message("Flush Step 1: Getting current playlist...")
+                current_playlist = player_window.playlist
+                current_playlist_set = set(p.casefold() for p in current_playlist)
+                log_message(f"Flush Step 1 SUCCESS: Playlist has {len(current_playlist)} items.")
+
+                # --- 容疑箇所 2: 重複排除 ---
+                log_message("Flush Step 2: Building unique file list...")
+                unique_files = []
+                for f in pending_files:
+                    f_norm = os.path.normpath(f)
+                    if f_norm.casefold() not in current_playlist_set:
+                        unique_files.append(f_norm)
+                        current_playlist_set.add(f_norm.casefold())
+                
+                pending_files = []
+                if not unique_files:
+                    log_message("Flush Step 2 SUCCESS: No new unique files to add. Sequence finished.")
+                    return
+                log_message(f"Flush Step 2 SUCCESS: Found {len(unique_files)} new unique files.")
+
+                # --- 容疑箇所 3: ソート ---
+                log_message("Flush Step 3: Sorting unique files...")
+                unique_files.sort(key=lambda p: (os.path.dirname(p).casefold(), natural_key(p)))
+                log_message("Flush Step 3 SUCCESS: Sorting complete.")
+
+                # --- 反復処理の準備 ---
+                import functools
+                files_to_add = unique_files
+                total_files = len(files_to_add)
+                is_first_addition_in_batch = not current_playlist
+
+                def add_file_iteratively(index):
+                    log_message(f"Inside add_file_iteratively, index={index}")
+                    if index >= total_files:
+                        log_message("Finished adding batch of files.")
+                        player_window.showNormal(); player_window.raise_(); player_window.activateWindow()
+                        return
+
+                    file_path = files_to_add[index]
+                    play_this_file = is_first_addition_in_batch and index == 0
+                    
+                    log_message(f"Attempting to add file {index + 1}/{total_files}: {file_path}")
+                    player_window.add_to_playlist([file_path], play_first=play_this_file)
+                    log_message(f"Successfully added file {index + 1}/{total_files}")
+
+                    next_index = index + 1
+                    QtCore.QTimer.singleShot(0, functools.partial(add_file_iteratively, next_index))
+
+                log_message("Flush Step 4: Starting iterative adding process...")
+                add_file_iteratively(0)
+
+            except Exception as e:
+                import traceback
+                log_message("!!!!!!!!!! CRITICAL ERROR inside flush_pending_files !!!!!!!!!!")
+                log_message(traceback.format_exc())
+                raise # クラッシュさせる
+
+        # flush_timerの接続先は変更なし
+        flush_timer.timeout.connect(flush_pending_files)
+
+        def enqueue_files(files: List[str]):
+            if not files: return
+            pending_files.extend(files)
+            flush_timer.start()
+
+        # IPCファイルの内容を処理する関数
+        def process_ipc_file():
+            if not os.path.exists(ipc_file_path):
+                return
+            
             try:
-                arr = json.loads(bytes(data).decode("utf-8", errors="ignore")) if data else []
-            except Exception:
-                arr = []
-            new_files = [a for a in arr if os.path.exists(a)]
-            _log("server received files=" + repr(new_files))
-            if new_files:
-                enqueue(new_files)
-                w.showNormal(); w.raise_(); w.activateWindow()
+                with open(ipc_file_path, "r+", encoding='utf-8') as f:
+                    lines = [line.strip() for line in f if line.strip()]
+                    if lines:
+                        log_message(f"IPC file changed. Read {len(lines)} files.")
+                        f.seek(0)
+                        f.truncate() # ファイルをクリア
+                        valid_files = [path for path in lines if os.path.exists(path)]
+                        enqueue_files(valid_files)
+            except (IOError, OSError) as e:
+                 log_message(f"Error processing IPC file: {e}")
+
+        # ファイル監視を開始
+        file_watcher = QtCore.QFileSystemWatcher([ipc_file_path])
+        file_watcher.fileChanged.connect(process_ipc_file)
+
+        # 起動時引数と、監視開始前に書き込まれた可能性のあるIPCファイルを処理
+        initial_files = [a for a in argv[1:] if os.path.exists(a)]
+        if initial_files:
+            enqueue_files(initial_files)
+        process_ipc_file() # 初期チェック
+
+        result = app.exec_()
+        lock_file.unlock()
+        return result
+
+    else:
+        #
+        # --- セカンダリインスタンスの処理 ---
+        #
+        log_message("Secondary instance: Lock busy. Appending to IPC file.")
+        files_to_send = [a for a in argv[1:] if os.path.exists(a)]
+        if files_to_send:
             try:
-                c.deleteLater()
-            except Exception:
-                pass
-
-        c.readyRead.connect(on_ready)
-        c.disconnected.connect(on_done)
-
-    server.newConnection.connect(on_new_conn)
-
-    return app.exec_()
-
+                # ファイルに追記するだけ
+                with open(ipc_file_path, "a", encoding='utf-8') as f:
+                    for path in files_to_send:
+                        f.write(path + "\n")
+            except (IOError, OSError) as e:
+                log_message(f"Secondary instance could not write to IPC file: {e}")
+                return 1 # エラー終了
+        
+        return 0 # 正常終了
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
-
-
+    sys.exit(main_wrapper(sys.argv))

@@ -585,7 +585,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self,
             "動画ファイルを選択",
             start_dir,
-            "動画ファイル (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.ts *.m4v);;すべてのファイル (*.*)",
+            "動画ファイル (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.ts *.m4v *.3gp *.3g2 *.mpeg *.mpg *.mpe *.rm *.rmvb *.vob *.webm);;すべてのファイル (*.*)",
         )
         if files:
             try:

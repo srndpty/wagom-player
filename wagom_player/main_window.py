@@ -306,6 +306,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         start_index = len(self.playlist)
         self.playlist.extend(added)
+        # タイトルの総数表示を更新（再生中のトラックは維持）
+        try:
+            self._update_window_title()
+        except Exception:
+            pass
         if play_first:
             self.play_at(start_index)
 

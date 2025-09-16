@@ -389,10 +389,20 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # ------------- 再生操作 -------------
     def toggle_play(self) -> None:
-        if self.player.is_playing():
+        """再生/一時停止を切り替える。停止状態からの再開も考慮する。"""
+        player_state = self.player.get_state()
+
+        # プレイヤーが完全に停止または終了している場合
+        if player_state in (vlc.State.Stopped, vlc.State.Ended, vlc.State.Error):
+            # 再生可能なファイルがプレイリストにあれば、現在のファイルを最初から再生する
+            if 0 <= self.current_index < len(self.playlist):
+                self.play_at(self.current_index)
+        # 再生中または一時停止中の場合
+        elif self.player.is_playing():
             self.player.pause()
         else:
             self.player.play()
+        
         self._update_play_button()
 
     def stop(self) -> None:

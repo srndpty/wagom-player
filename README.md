@@ -72,5 +72,8 @@ pip install -r requirements.txt
 python app.py "C:\path\to\video1.mp4" "C:\path\to\video2.mkv"
 ```
 
+### 既知の問題
+- 多くのファイル（30以上）を同時に開いた場合、1つだけ再生リストに追加されない場合がある（アプリを閉じて再度開くと直る）
+
 ## ライセンス
 MIT.

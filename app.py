@@ -188,7 +188,7 @@ def main(argv: List[str]) -> int:
                 log_message(
                     "IPC: Watcher triggered or initial call. Reading IPC file..."
                 )
-                with open(ipc_file_path, "r+", encoding="utf-8") as f:
+                with open(ipc_file_path, "r+", encoding="utf-8", errors="ignore") as f:
                     lines = [line.strip() for line in f if line.strip()]
                     if lines:
                         log_message(f"IPC file processed. Read {len(lines)} files.")

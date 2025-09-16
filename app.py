@@ -39,14 +39,39 @@ def natural_key(path: str):
 # --- メイン処理 ---
 def main_wrapper(argv: List[str]) -> int:
     try:
-        main(argv)
-        return 0
+        # main()は正常終了時に app.exec_() の戻り値を返す
+        return main(argv)
     except Exception as e:
         import traceback
+        from PyQt5 import QtWidgets
 
+        # 詳細なエラー情報を文字列として整形
+        error_title = "Wagom Player - 致命的なエラー"
+        error_message = "予期せぬエラーが発生したため、アプリケーションを終了します。"
+        detailed_text = traceback.format_exc()
+
+        # まずログファイルに完全なエラー情報を記録する（既存の処理）
         log_message("!!!!!!!!!! UNHANDLED EXCEPTION !!!!!!!!!!")
-        log_message(traceback.format_exc())
-        # エラーダイアログを表示するなどの処理
+        log_message(detailed_text)
+
+        # --- ここからエラーダイアログ表示処理 ---
+        # 既にQApplicationインスタンスが存在するか確認し、なければ作成する
+        # これにより、アプリ初期化のどの段階でエラーが起きてもダイアログを表示できる
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            app = QtWidgets.QApplication(sys.argv)
+
+        # QMessageBoxでエラー内容をユーザーに通知
+        msg_box = QtWidgets.QMessageBox()
+        msg_box.setIcon(QtWidgets.QMessageBox.Critical)
+        msg_box.setText(error_message)
+        msg_box.setInformativeText("エラーの詳細はログファイルに記録されました。")
+        msg_box.setWindowTitle(error_title)
+        # 「詳細の表示」ボタンで、ユーザーが直接エラー内容を確認できるようにする
+        msg_box.setDetailedText(detailed_text)
+        msg_box.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        msg_box.exec_()
+        
         return 1
 
 
@@ -199,8 +224,11 @@ def main(argv: List[str]) -> int:
         if not pending_files:
             flush_timer.start()
 
-        result = app.exec_()
-        lock_file.unlock()
+        try:
+            result = app.exec_()
+        finally:
+            # アプリが正常・異常終了どちらでもロックを確実に解除する
+            lock_file.unlock()
         return result
 
     else:

@@ -47,6 +47,55 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # UI
         self._build_ui()
 
+        self.SEEK_SLIDER_STYLE_NORMAL = """
+            QSlider::groove:horizontal {
+                border: 1px solid #444;
+                height: 8px;
+                background: #333;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #ddd;
+                border: 1px solid #aaa;
+                width: 16px;
+                margin: -4px 0;
+                border-radius: 8px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4a90e2; /* 通常時の色: 青 */
+                border: 1px solid #444;
+                height: 8px;
+                border-radius: 4px;
+            }
+        """
+        self.SEEK_SLIDER_STYLE_WARNING = """
+            QSlider::groove:horizontal {
+                border: 1px solid #444;
+                height: 8px;
+                background: #333;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #ddd;
+                border: 1px solid #aaa;
+                width: 16px;
+                margin: -4px 0;
+                border-radius: 8px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #f5a623; /* 終了間近の色: 黄色 */
+                border: 1px solid #444;
+                height: 8px;
+                border-radius: 4px;
+            }
+        """
+        # 現在のシークバーの状態を管理するフラグ
+        self._is_seek_bar_warning = False
+        # 初期スタイルを適用
+        self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
+
         # プレイリスト
         self.playlist: List[str] = []
         self.current_index: int = -1
@@ -368,6 +417,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._update_window_title(os.path.basename(path))
         self.status.showMessage(f"再生中: {path}")
 
+        # 新しい動画を再生する際に、シークバーの色を通常に戻す
+        if self._is_seek_bar_warning:
+            self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
+            self._is_seek_bar_warning = False
+        
         self._media_length = -1
         self.seek_slider.blockSignals(True)
         self.seek_slider.setEnabled(True)
@@ -407,6 +461,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def stop(self) -> None:
         self.player.stop()
+        # 停止時にシークバーの色を通常に戻す
+        if self._is_seek_bar_warning:
+            self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
+            self._is_seek_bar_warning = False
+        
         self.seek_slider.blockSignals(True)
         self.seek_slider.setEnabled(False)
         self.seek_slider.setRange(0, 0)
@@ -566,6 +625,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self.seek_slider.blockSignals(True)
                 self.seek_slider.setValue(cur)
                 self.seek_slider.blockSignals(False)
+                
+            is_near_end = (cur > total - 10000)
+            if is_near_end and not self._is_seek_bar_warning:
+                # 黄色に変更
+                self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_WARNING)
+                self._is_seek_bar_warning = True
+            elif not is_near_end and self._is_seek_bar_warning:
+                # 青色に戻す
+                self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
+                self._is_seek_bar_warning = False
         # 再生ボタン表示
         self._update_play_button()
 

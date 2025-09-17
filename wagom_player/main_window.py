@@ -617,7 +617,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # Num 6: "_ng" フォルダに移動
         self._sc_move_ng = QtWidgets.QShortcut(
-            QtGui.QKeySequence(int(QtCore.Qt.Key_6 | QtCore.Qt.KeypadModifier)), self
+            QtGui.QKeySequence(int(QtCore.Qt.Key_7 | QtCore.Qt.KeypadModifier)), self
         )
         self._sc_move_ng.setContext(QtCore.Qt.ApplicationShortcut)
         self._sc_move_ng.activated.connect(

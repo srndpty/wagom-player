@@ -49,46 +49,46 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         self.SEEK_SLIDER_STYLE_NORMAL = """
             QSlider::groove:horizontal {
-                border: 1px solid #444;
-                height: 8px;
-                background: #333;
-                margin: 2px 0;
-                border-radius: 4px;
+                border: none;
+                height: 4px;
+                background: #555;
+                border-radius: 2px;
+                margin: 0px 4px;
             }
             QSlider::handle:horizontal {
-                background: #ddd;
-                border: 1px solid #aaa;
-                width: 16px;
-                margin: -4px 0;
-                border-radius: 8px;
+                background: #4a90e2; /* 青色 */
+                border: none;
+                width: 8px;
+                height: 14px;
+                border-radius: 4px;
+                margin: -5px -4px;
             }
             QSlider::sub-page:horizontal {
-                background: #4a90e2; /* 通常時の色: 青 */
-                border: 1px solid #444;
-                height: 8px;
-                border-radius: 4px;
+                background: #4a90e2; /* 青色 */
+                border: none;
+                border-radius: 2px;
             }
         """
         self.SEEK_SLIDER_STYLE_WARNING = """
             QSlider::groove:horizontal {
-                border: 1px solid #444;
-                height: 8px;
-                background: #333;
-                margin: 2px 0;
-                border-radius: 4px;
+                border: none;
+                height: 4px;
+                background: #555;
+                border-radius: 2px;
+                margin: 0px 4px;
             }
             QSlider::handle:horizontal {
-                background: #ddd;
-                border: 1px solid #aaa;
-                width: 16px;
-                margin: -4px 0;
-                border-radius: 8px;
+                background: #f5a623; /* 黄色 */
+                border: none;
+                width: 8px;
+                height: 14px;
+                border-radius: 4px;
+                margin: -5px -4px;
             }
             QSlider::sub-page:horizontal {
-                background: #f5a623; /* 終了間近の色: 黄色 */
-                border: 1px solid #444;
-                height: 8px;
-                border-radius: 4px;
+                background: #f5a623; /* 黄色 */
+                border: none;
+                border-radius: 2px;
             }
         """
         # 現在のシークバーの状態を管理するフラグ
@@ -147,6 +147,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # シークバー
         self.seek_slider = SeekSlider(QtCore.Qt.Horizontal, self)
+        self.seek_slider.setMinimumHeight(22)
         self.seek_slider.setRange(0, 0)
         self.seek_slider.setEnabled(False)
         layout.addWidget(self.seek_slider)
@@ -179,13 +180,41 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.volume_icon.setAlignment(QtCore.Qt.AlignCenter)
         self.volume_label = QtWidgets.QLabel("音量")
         self.volume_slider = SeekSlider(QtCore.Qt.Horizontal, self)
+        self.volume_slider.setObjectName("VolumeSlider")
+        self.volume_slider.setMinimumHeight(22)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setFixedWidth(140)
         self.volume_slider.setValue(80)
         ctrl.addWidget(self.volume_icon)
         ctrl.addWidget(self.volume_label)
         ctrl.addWidget(self.volume_slider)
-
+        volume_slider_style = """
+            #VolumeSlider {
+                min-height: 22px;
+            }
+            #VolumeSlider::groove:horizontal {
+                border: none;
+                height: 4px;
+                background: #555;
+                border-radius: 2px;
+                margin: 0px 4px; /* ハンドルの幅の半分 */
+            }
+            #VolumeSlider::handle:horizontal {
+                background: #4a90e2;
+                border: none;
+                width: 8px;   /* 幅を狭く */
+                height: 14px; /* 高さを確保 */
+                border-radius: 4px; /* 角を丸める */
+                margin: -5px -4px; /* (14-4)/2=5, 8/2=4 */
+            }
+            #VolumeSlider::sub-page:horizontal {
+                background: #4a90e2;
+                border: none;
+                border-radius: 2px;
+            }
+        """
+        # 既存のスタイルシートに追記する
+        self.setStyleSheet(self.styleSheet() + volume_slider_style)
         self.status = self.statusBar()
         self.status.showMessage("準備完了")
 

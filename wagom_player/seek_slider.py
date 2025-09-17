@@ -23,7 +23,7 @@ class SeekSlider(QtWidgets.QSlider):
         # 目盛り線の色とスタイルを設定 (白の半透明)
         pen_color = QtGui.QColor(255, 255, 255, 100)  # RGBA (A=100で半透明)
         pen = QtGui.QPen(pen_color)
-        pen.setWidth(1)  # 線の太さ
+        pen.setWidth(2)  # 線の太さ
         painter.setPen(pen)
 
         # --- 目盛り線の位置を計算して描画 ---

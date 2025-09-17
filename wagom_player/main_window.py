@@ -476,10 +476,22 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def seek_by(self, delta_ms: int) -> None:
         try:
             t = self.player.get_time()
-            if t == -1:
-                return
-            new_t = max(0, t + delta_ms)
             length = self.player.get_length()
+            if t == -1 or length <= 0:
+                return
+            
+            new_t = max(0, t + delta_ms)
+
+            # 60秒進めるショートカット(delta_ms > 0)の場合のみ特別処理をチェック
+            if delta_ms > 0 and delta_ms == self.SEEK_LONG_MS:
+                # 動画終了10秒前の時間（ミリ秒）を計算
+                end_threshold = length - 10000
+
+                # 移動先が終了10秒前を過ぎてしまう場合
+                if new_t > end_threshold:
+                    # 移動先を、ちょうど終了10秒前の位置に設定する
+                    new_t = end_threshold
+
             if length > 0:
                 new_t = min(new_t, length - 1000)
             self.player.set_time(new_t)
@@ -625,7 +637,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self.seek_slider.blockSignals(True)
                 self.seek_slider.setValue(cur)
                 self.seek_slider.blockSignals(False)
-                
+
             is_near_end = (cur > total - 10000)
             if is_near_end and not self._is_seek_bar_warning:
                 # 黄色に変更

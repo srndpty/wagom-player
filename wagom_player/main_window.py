@@ -29,6 +29,45 @@ def _create_vlc_instance() -> "vlc.Instance":
         return vlc.Instance([f"--plugin-path={lib_path}"])  # type: ignore[arg-type]
     return vlc.Instance()
 
+class MetadataDialog(QtWidgets.QDialog):
+    """メタデータを表示・コピーするためのダイアログ"""
+    def __init__(self, metadata_text: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("動画ファイルのメタデータ")
+        self.setMinimumSize(500, 400)
+
+        # --- UI要素の作成 ---
+        # メタデータ表示用のテキストエリア (読み取り専用)
+        self.text_edit = QtWidgets.QPlainTextEdit(self)
+        self.text_edit.setPlainText(metadata_text)
+        self.text_edit.setReadOnly(True)
+        self.text_edit.setFont(QtGui.QFont("Courier New", 10)) # 等幅フォントで見やすく
+
+        # ボタン
+        self.copy_button = QtWidgets.QPushButton("クリップボードにコピー")
+        self.close_button = QtWidgets.QPushButton("閉じる")
+
+        # --- レイアウト設定 ---
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.copy_button)
+        button_layout.addWidget(self.close_button)
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.addWidget(self.text_edit)
+        main_layout.addLayout(button_layout)
+
+        # --- シグナル接続 ---
+        self.copy_button.clicked.connect(self._copy_to_clipboard)
+        self.close_button.clicked.connect(self.accept) # ダイアログを閉じる
+
+    def _copy_to_clipboard(self):
+        """テキストエリアの内容をクリップボードにコピーする"""
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(self.text_edit.toPlainText())
+        # ユーザーにフィードバック
+        self.copy_button.setText("コピーしました！")
+        QtCore.QTimer.singleShot(1500, lambda: self.copy_button.setText("クリップボードにコピー"))
 
 class VlcEvents(QtCore.QObject):
     media_ended = QtCore.pyqtSignal()
@@ -516,6 +555,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         except Exception:
             pass
         media = self.vlc_instance.media_new(path)
+        media.parse()
         self.player.set_media(media)
 
         QtWidgets.QApplication.processEvents()
@@ -703,6 +743,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_move_ng.activated.connect(
             lambda: self._move_current_file_and_play_next("_ng")
         )
+
+        # Iキーでメタデータ情報表示
+        self._sc_metadata = mk(QtCore.Qt.Key_I, self._show_metadata_dialog)
 
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
@@ -999,3 +1042,84 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # 表示されている場合のみ、位置を更新する
         if self.duration_overlay_label.isVisible():
             self._update_overlay_geometry()
+
+    # VideoPlayer クラスの末尾あたりに追加
+    # ### 変更点 4/4: メタデータを収集してダイアログを表示するメソッドを新規作成 ###
+    def _show_metadata_dialog(self):
+        """現在再生中の動画のメタデータを抽出し、ダイアログで表示する"""
+        print("Show Metadata Dialog triggered")
+        # 再生中でなければ何もしない
+        if not (0 <= self.current_index < len(self.directory_playlist)):
+            self.status.showMessage("再生中のファイルがありません", 3000)
+            return
+
+        media = self.player.get_media()
+        if not media:
+            return
+
+        # --- メタデータの収集 ---
+        metadata_lines = []
+        
+        # 1. 基本情報
+        file_path = self.directory_playlist[self.current_index]
+        metadata_lines.append(f"ファイルパス: {file_path}")
+        
+        duration_ms = media.get_duration()
+        if duration_ms > 0:
+            metadata_lines.append(f"長さ: {self._format_ms(duration_ms)} ({duration_ms} ms)")
+        
+        metadata_lines.append("-" * 20)
+
+        # 2. VLCから取得できるメタデータ
+        # 取得したいメタデータの種類を定義
+        # 表示したいメタデータの種類を、表示名とvlc.Meta enumのマッピングで定義
+        meta_fields = {
+            # --- 基本情報 ---
+            "Title": vlc.Meta.Title,
+            "Artist": vlc.Meta.Artist,
+            "Album": vlc.Meta.Album,
+            "Album Artist": vlc.Meta.AlbumArtist,
+            "Genre": vlc.Meta.Genre,
+            "Date": vlc.Meta.Date,
+            "Description": vlc.Meta.Description,
+            # --- トラック/ディスク情報 ---
+            "Track Number": vlc.Meta.TrackNumber,
+            "Track Total": vlc.Meta.TrackTotal,
+            "Disc Number": vlc.Meta.DiscNumber,
+            "Disc Total": vlc.Meta.DiscTotal,
+            "Track ID": vlc.Meta.TrackID,
+            # --- TV/映画情報 ---
+            "Show Name": vlc.Meta.ShowName,
+            "Season": vlc.Meta.Season,
+            "Episode": vlc.Meta.Episode,
+            "Director": vlc.Meta.Director,
+            "Actors": vlc.Meta.Actors,
+            # --- その他 ---
+            "Rating": vlc.Meta.Rating,
+            "Language": vlc.Meta.Language,
+            "Copyright": vlc.Meta.Copyright,
+            "Publisher": vlc.Meta.Publisher,
+            "Encoded By": vlc.Meta.EncodedBy,
+            "Setting": vlc.Meta.Setting,
+            "URL": vlc.Meta.URL,
+            "Artwork URL": vlc.Meta.ArtworkURL,
+            "Now Playing": vlc.Meta.NowPlaying,
+        }
+        
+        # ### 変更点: 値が空でも項目を表示するようにループ処理を変更 ###
+        for name, field_enum in meta_fields.items():
+            # media.get_meta() は値がなければ None を返す
+            value = media.get_meta(field_enum)
+            
+            # valueがNoneなら空文字列に変換し、そうでなければそのままの値を使う
+            # これにより、値がなくても "項目名: " という行が必ず追加される
+            display_value = value or ""
+            
+            metadata_lines.append(f"{name}: {display_value}")
+
+        # --- ダイアログの表示 ---
+        final_text = "\n".join(metadata_lines)
+        
+        # 作成したMetadataDialogクラスのインスタンスを生成して表示
+        dialog = MetadataDialog(final_text, self)
+        dialog.exec_() # モーダルダイアログとして表示

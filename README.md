@@ -34,6 +34,7 @@
 | `↑` / `↓` | 音量 UP / DOWN (Volume Up / Down) |
 | `M` | ミュート ON/OFF (Toggle Mute) |
 | **ウィンドウ操作** | |
+| `I` | メタデータ情報の表示 |
 | `テンキー 0` | ウィンドウの最大化 (Maximize Window) |
 | `テンキー 8` | アプリケーションを終了 (Exit Application) |
 

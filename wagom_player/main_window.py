@@ -639,6 +639,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.add_to_playlist(files, play_first=first)
             event.acceptProposedAction()
 
+    def _format_ms(self, ms: int) -> str:
+        """ミリ秒を MM:SS または HH:MM:SS 形式の文字列に変換する"""
+        if ms <= 0:
+            return "00:00"
+        s = ms // 1000
+        m, s = divmod(s, 60)
+        h, m = divmod(m, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+    
     # ------------- ステータス更新 -------------
     def _update_status_time(self) -> None:
         if not self.player:
@@ -646,22 +655,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         cur = self.player.get_time()
         total = self.player.get_length()
 
-        def f(ms: int) -> str:
-            if ms <= 0:
-                return "00:00"
-            s = ms // 1000
-            m, s = divmod(s, 60)
-            h, m = divmod(m, 60)
-            return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-
         if cur >= 0 and total > 0:
-            self.status.showMessage(f"{f(cur)} / {f(total)}")
+            self.status.showMessage(f"{self._format_ms(cur)} / {self._format_ms(total)}")
             if total != self._media_length:
                 self._media_length = total
                 self.seek_slider.blockSignals(True)
                 self.seek_slider.setEnabled(True)
                 self.seek_slider.setRange(0, total)
                 self.seek_slider.blockSignals(False)
+                self._update_window_title()
             if not self._seeking_user:
                 self.seek_slider.blockSignals(True)
                 self.seek_slider.setValue(cur)
@@ -688,7 +690,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
         idx = (self.current_index + 1) if self.current_index >= 0 else 0
         total = len(self.playlist)
         prefix = f"[{idx}/{total}] " if total else ""
-        self.setWindowTitle(f"wagom-player - {prefix}{name}")
+
+        duration_str = ""
+        if self._media_length > 0:
+            duration_str = f" [{self._format_ms(self._media_length)}]"
+
+        self.setWindowTitle(f"{prefix}{name}{duration_str}")
 
     def _update_play_button(self) -> None:
         try:

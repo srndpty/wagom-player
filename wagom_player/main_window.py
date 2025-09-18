@@ -1,6 +1,7 @@
 import os
 import sys
 import shutil
+import re
 from typing import List, Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -16,6 +17,11 @@ except ImportError as e:
         "python-vlc が見つかりません。`pip install python-vlc` を実行してください"
     ) from e
 
+def natural_key(path: str):
+    """ファイル名を自然順ソートするためのキーを生成する (例: 2.mp4 < 10.mp4)"""
+    name = os.path.basename(path)
+    parts = re.split(r"(\d+)", name)
+    return [int(p) if p.isdigit() else p.casefold() for p in parts]
 
 def _create_vlc_instance() -> "vlc.Instance":
     lib_path = os.environ.get("PYTHON_VLC_LIB_PATH")
@@ -32,7 +38,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
     SEEK_SHORT_MS = 10_000
     SEEK_LONG_MS = 60_000
 
-    def __init__(self, files: Optional[List[str]] = None):
+    def __init__(self, file: Optional[str] = None):
         super().__init__()
         self.setWindowTitle("wagom-player")
         self.resize(960, 540)
@@ -129,10 +135,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
 
         # プレイリスト
-        self.playlist: List[str] = []
+        self.directory_playlist: List[str] = [] # ディレクトリ内の動画リスト
         self.current_index: int = -1
-        if files:
-            self.add_to_playlist(files, play_first=True)
 
         # タイマー
         self.timer = QtCore.QTimer(self)
@@ -163,6 +167,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # 設定の復元（レイアウト構築・初期化後）
         self._load_settings()
+
+        # 起動時にファイルが渡された場合、そのファイルをロードする
+        if file:
+            self._load_file_and_directory(file)
+            
 
     # ---------------- UI ----------------
     def _build_ui(self) -> None:
@@ -349,6 +358,57 @@ class VideoPlayer(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    def _load_file_and_directory(self, file_path: str):
+        """指定されたファイルを開き、そのディレクトリ内の動画ファイルをリストアップする"""
+        if not os.path.isfile(file_path):
+            return
+
+        directory = os.path.dirname(file_path)
+        log_message(f"Scanning directory: {directory}")
+
+        # サポートする動画ファイルの拡張子
+        supported_extensions = {
+            ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv",
+            ".ts", ".m4v", ".3gp", ".3g2", ".mpeg", ".mpg",
+            ".mpe", ".rm", ".rmvb", ".vob", ".webm"
+        }
+
+        # ディレクトリをスキャンし、動画ファイルだけをフィルタリング
+        try:
+            all_files = os.listdir(directory)
+            video_files = [
+                os.path.join(directory, f) for f in all_files
+                if os.path.splitext(f)[1].lower() in supported_extensions
+            ]
+        except OSError as e:
+            log_message(f"Error scanning directory: {e}")
+            self.status.showMessage(f"ディレクトリのスキャンに失敗しました: {e}", 5000)
+            return
+
+        if not video_files:
+            log_message("No video files found in the directory.")
+            # 動画が1つも見つからない場合でも、指定されたファイルだけは再生する
+            video_files = [file_path]
+
+        # 自然順ソート
+        video_files.sort(key=natural_key)
+
+        self.directory_playlist = video_files
+
+        # 渡されたファイルがリストの何番目にあるかを探す
+        try:
+            # パスを正規化して比較
+            normalized_path = os.path.normpath(file_path)
+            normalized_playlist = [os.path.normpath(p) for p in self.directory_playlist]
+            self.current_index = normalized_playlist.index(normalized_path)
+        except ValueError:
+            # 万が一見つからない場合は、最初のファイルを再生
+            log_message(f"Could not find '{file_path}' in scanned list. Defaulting to first file.")
+            self.current_index = 0
+
+        # 再生開始
+        self.play_at(self.current_index)
+
     # --------------- 設定保存/復元 ---------------
     def _load_settings(self) -> None:
         try:
@@ -408,7 +468,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         self._ending = True
         cur = self.current_index
-        total = len(self.playlist)
+        total = len(self.directory_playlist)
         if self.repeat_enabled and 0 <= cur < total:
             QtCore.QTimer.singleShot(80, lambda idx=cur: self._end_after(idx))
             return
@@ -424,7 +484,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _on_media_ended_in_qt(self) -> None:
         # 最後まで到達したらリピート設定に従う
-        if self.current_index + 1 < len(self.playlist):
+        if self.current_index + 1 < len(self.directory_playlist):
             self.play_next()
         elif self.repeat_enabled:
             QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index))
@@ -441,30 +501,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.player.set_xwindow(wid)  # type: ignore[attr-defined]
 
     # ------------- プレイリスト -------------
-    def add_to_playlist(self, files: List[str], play_first: bool = False) -> None:
-        added = [f for f in files if os.path.isfile(f)]
-        if not added:
-            return
-        start_index = len(self.playlist)
-        self.playlist.extend(added)
-        # タイトルの総数表示を更新（再生中のトラックは維持）
-        try:
-            self._update_window_title()
-        except Exception:
-            pass
-        if play_first:
-            self.play_at(start_index)
-        log_message(
-            f"add_to_playlist called with {len(files)} files. play_first={play_first}"
-        )
+
 
     def play_at(self, index: int) -> None:
-        if not (0 <= index < len(self.playlist)):
+        if not (0 <= index < len(self.directory_playlist)):
             return
         
         self.duration_overlay_label.hide()
         self.current_index = index
-        path = self.playlist[index]
+        path = self.directory_playlist[index]
         # 切替安定化のため一旦停止
         try:
             self.player.stop()
@@ -493,13 +538,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.blockSignals(False)
 
     def play_next(self) -> None:
-        if not self.playlist:
+        if not self.directory_playlist:
             return
-        if (self.current_index + 1) < len(self.playlist):
+        if (self.current_index + 1) < len(self.directory_playlist):
             QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index + 1))
 
     def play_previous(self) -> None:
-        if not self.playlist:
+        if not self.directory_playlist:
             return
         if (self.current_index - 1) >= 0:
             QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index - 1))
@@ -512,7 +557,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # プレイヤーが完全に停止または終了している場合
         if player_state in (vlc.State.Stopped, vlc.State.Ended, vlc.State.Error):
             # 再生可能なファイルがプレイリストにあれば、現在のファイルを最初から再生する
-            if 0 <= self.current_index < len(self.playlist):
+            if 0 <= self.current_index < len(self.directory_playlist):
                 self.play_at(self.current_index)
         # 再生中または一時停止中の場合
         elif self.player.is_playing():
@@ -670,8 +715,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         urls = event.mimeData().urls()
         files = [u.toLocalFile() for u in urls if u.isLocalFile()]
         if files:
-            first = not self.playlist
-            self.add_to_playlist(files, play_first=first)
+            self._load_file_and_directory(files[0])
             event.acceptProposedAction()
 
     def _format_ms(self, ms: int) -> str:
@@ -701,7 +745,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self._update_window_title()
                 formatted_time = self._format_ms(total)
                 self.duration_overlay_label.setText(formatted_time)
-                
+
                 self._update_overlay_geometry()
                 self.duration_overlay_label.show() # 表示
                 self.duration_overlay_label.raise_()   # 最前面に移動
@@ -712,7 +756,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self.seek_slider.setValue(cur)
                 self.seek_slider.blockSignals(False)
 
-            is_near_end = (cur > total - 10000)
+            is_near_end = (cur > total - 12_000) # 10秒だと判定が微妙なので12秒に余裕を持たせる
             if is_near_end and not self._is_seek_bar_warning:
                 # 黄色に変更
                 self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_WARNING)
@@ -726,12 +770,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _update_window_title(self, filename: Optional[str] = None) -> None:
         name = filename or (
-            os.path.basename(self.playlist[self.current_index])
-            if 0 <= self.current_index < len(self.playlist)
+            os.path.basename(self.directory_playlist[self.current_index])
+            if 0 <= self.current_index < len(self.directory_playlist)
             else ""
         )
         idx = (self.current_index + 1) if self.current_index >= 0 else 0
-        total = len(self.playlist)
+        total = len(self.directory_playlist)
         prefix = f"[{idx}/{total}] " if total else ""
 
         duration_str = ""
@@ -835,33 +879,31 @@ class VideoPlayer(QtWidgets.QMainWindow):
     # ------------- ファイルダイアログ -------------
     def open_files_dialog(self) -> None:
         start_dir = self.settings.value("last_dir", os.path.expanduser("~"))
-        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+        file, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "動画ファイルを選択",
             start_dir,
             "動画ファイル (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.ts *.m4v *.3gp *.3g2 *.mpeg *.mpg *.mpe *.rm *.rmvb *.vob *.webm);;すべてのファイル (*.*)",
         )
-        if files:
+        if file:
             try:
-                self.settings.setValue("last_dir", os.path.dirname(files[0]))
+                self.settings.setValue("last_dir", os.path.dirname(file))
             except Exception:
                 pass
-            play_first = not self.playlist
-            self.add_to_playlist(files, play_first=play_first)
+            self._load_file_and_directory(file)
 
     # ------------- ファイル移動と次の動画再生 -------------
     def _move_current_file_and_play_next(self, subfolder_name: str):
         """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
         # 再生中でない、またはプレイリストが空の場合は何もしない
-        if not (0 <= self.current_index < len(self.playlist)):
+        if not (0 <= self.current_index < len(self.directory_playlist)):
             log_message("Move requested, but no file is playing.")
             return
 
         # --- 重要な情報を先に保存しておく ---
         index_to_remove = self.current_index
-        current_file_path = self.playlist[index_to_remove]
+        current_file_path = self.directory_playlist[index_to_remove]
 
-        # ★★★★★ 修正の核心 ★★★★★
         # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
         log_message("Stopping playback to release file lock...")
         self.stop()
@@ -902,16 +944,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # --- プレイリストの更新と次の曲の再生 ---
 
         # プレイリストから該当ファイルを削除
-        self.playlist.pop(index_to_remove)
+        self.directory_playlist.pop(index_to_remove)
 
         # ウィンドウタイトルの表示を更新
         self._update_window_title()
 
-        if not self.playlist:
+        if not self.directory_playlist:
             log_message("Playlist is now empty. Playback remains stopped.")
             self.stop()  # 念のため再度stopを呼び、UIを停止状態に保つ
         else:
-            if index_to_remove >= len(self.playlist):
+            if index_to_remove >= len(self.directory_playlist):
                 log_message(
                     "Last item in playlist was moved. Playback remains stopped."
                 )

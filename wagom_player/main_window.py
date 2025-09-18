@@ -47,6 +47,38 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # UI
         self._build_ui()
 
+        # ### 変更点 1/5: オーバーレイ用ラベルとタイマーを追加 ###
+        # 1. オーバーレイ表示用のラベルを作成 (video_frameの子だと表示されない)
+        self.duration_overlay_label = QtWidgets.QLabel(self)
+        self.duration_overlay_label.setWindowFlags(
+            QtCore.Qt.FramelessWindowHint | # ウィンドウの枠を消す
+            QtCore.Qt.Tool |                # タスクバーに表示させない
+            QtCore.Qt.WindowStaysOnTopHint  # 常に最前面に表示するヒント
+        )
+        self.duration_overlay_label.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        self.duration_overlay_label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+        self.duration_overlay_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        self.duration_overlay_label.setStyleSheet("""
+            background-color: transparent;
+            border: none;
+            color: white;
+            font-size: 48px; /* 少し小さくして見やすく */
+            font-weight: bold;
+            padding: 10px; /* ウィンドウの角からの余白 */
+            text-shadow:
+                2px 0px 3px #000, -2px 0px 3px #000,
+                0px 2px 3px #000, 0px -2px 3px #000,
+                1px 1px 3px #000, -1px -1px 3px #000,
+                1px -1px 3px #000, -1px 1px 3px #000;
+        """)
+        self.duration_overlay_label.hide() # 最初は非表示
+
+        # 2. ラベルを1.5秒後に非表示にするためのタイマー
+        self.duration_overlay_timer = QtCore.QTimer(self)
+        self.duration_overlay_timer.setSingleShot(True)
+        self.duration_overlay_timer.setInterval(1500) # 1.5秒
+        self.duration_overlay_timer.timeout.connect(self.duration_overlay_label.hide)
+
         self.SEEK_SLIDER_STYLE_NORMAL = """
             QSlider::groove:horizontal {
                 border: none;
@@ -429,6 +461,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def play_at(self, index: int) -> None:
         if not (0 <= index < len(self.playlist)):
             return
+        
+        self.duration_overlay_label.hide()
         self.current_index = index
         path = self.playlist[index]
         # 切替安定化のため一旦停止
@@ -490,6 +524,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def stop(self) -> None:
         self.player.stop()
+        self.duration_overlay_label.hide()
         # 停止時にシークバーの色を通常に戻す
         if self._is_seek_bar_warning:
             self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
@@ -664,6 +699,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self.seek_slider.setRange(0, total)
                 self.seek_slider.blockSignals(False)
                 self._update_window_title()
+                formatted_time = self._format_ms(total)
+                self.duration_overlay_label.setText(formatted_time)
+                
+                self._update_overlay_geometry()
+                self.duration_overlay_label.show() # 表示
+                self.duration_overlay_label.raise_()   # 最前面に移動
+                self.duration_overlay_timer.start() # 非表示タイマースタート
+            
             if not self._seeking_user:
                 self.seek_slider.blockSignals(True)
                 self.seek_slider.setValue(cur)
@@ -878,3 +921,39 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 log_message(f"Playing next item at index {index_to_remove}.")
                 # 少しディレイを入れると、UIの応答性が良くなることがある
                 QtCore.QTimer.singleShot(50, lambda: self.play_at(index_to_remove))
+                
+    def _update_overlay_geometry(self):
+        """
+        オーバーレイウィンドウの位置とサイズを、video_frameに正確に合わせる。
+        VLCウィンドウのグローバル座標を計算して追従させる。
+        """
+        if not self.video_frame.isVisible():
+            return
+        
+        # ### ★★★ 変更点 ★★★ ###
+        # video_frame の左上の座標を、スクリーン全体のグローバル座標系に変換する
+        global_pos = self.video_frame.mapToGlobal(QtCore.QPoint(0, 0))
+        
+        # video_frame のサイズを取得する
+        frame_size = self.video_frame.size()
+        
+        # オーバーレイウィンドウのジオメトリを設定する
+        self.duration_overlay_label.setGeometry(
+            global_pos.x(),
+            global_pos.y(),
+            frame_size.width(),
+            frame_size.height()
+        )
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        """ウィンドウのリサイズに合わせてオーバーレイラベルのサイズを調整する"""
+        super().resizeEvent(event)
+        # video_frameの現在の大きさにラベルをぴったり合わせる
+        self.duration_overlay_label.setGeometry(self.video_frame.rect())
+    
+    def moveEvent(self, event: QtGui.QMoveEvent) -> None:
+        """メインウィンドウの移動に合わせてオーバーレイの位置を更新する"""
+        super().moveEvent(event)
+        # 表示されている場合のみ、位置を更新する
+        if self.duration_overlay_label.isVisible():
+            self._update_overlay_geometry()

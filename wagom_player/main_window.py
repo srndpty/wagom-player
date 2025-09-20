@@ -89,6 +89,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.vlc_events = VlcEvents()
         self._attach_vlc_events()
 
+        # ### 変更点 1/6: シャッフル関連の変数を追加 ###
+        self.repeat_enabled: bool = False
+        self.shuffle_enabled: bool = False
+        self.shuffled_playlist: List[str] = []
+
         # UI
         self._build_ui()
 
@@ -243,6 +248,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_next = QtWidgets.QPushButton()
         self.btn_repeat = QtWidgets.QPushButton()
         self.btn_repeat.setCheckable(True)
+        self.btn_shuffle = QtWidgets.QPushButton()
+        self.btn_shuffle.setCheckable(True)
+
         for b in (
             self.btn_open,
             self.btn_play,
@@ -250,6 +258,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.btn_prev,
             self.btn_next,
             self.btn_repeat,
+            self.btn_shuffle,
         ):
             ctrl.addWidget(b)
         ctrl.addStretch(1)
@@ -305,6 +314,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_prev.clicked.connect(self.play_previous)
         self.btn_next.clicked.connect(self.play_next)
         self.btn_repeat.toggled.connect(self._on_repeat_toggled)
+        self.btn_shuffle.toggled.connect(self._on_shuffle_toggled)
         self.seek_slider.sliderPressed.connect(self._on_seek_pressed)
         self.seek_slider.sliderReleased.connect(self._on_seek_released)
         self.seek_slider.sliderMoved.connect(self._on_slider_moved)
@@ -357,18 +367,23 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._icon_mute = QtGui.QIcon(resource_path("resources", "icons", "mute.svg"))
         if hasattr(self, "volume_icon"):
             self.volume_icon.setPixmap((self._icon_volume).pixmap(18, 18))
+
         # リピートアイコン
-        self._icon_repeat_on = QtGui.QIcon(
-            resource_path("resources", "icons", "repeat.svg")
-        )
-        self._icon_repeat_off = QtGui.QIcon(
-            resource_path("resources", "icons", "repeat_off.svg")
-        )
+        self._icon_repeat_on = QtGui.QIcon(resource_path("resources", "icons", "repeat.svg"))
+        self._icon_repeat_off = QtGui.QIcon(resource_path("resources", "icons", "repeat_off.svg"))
         self.btn_repeat.setFixedSize(36, 28)
         self.btn_repeat.setIconSize(QtCore.QSize(18, 18))
         self.btn_repeat.setToolTip("リピート再生")
         self.repeat_enabled = False
         self._update_repeat_button()
+
+        # シャッフルアイコン (新規)
+        self._icon_shuffle_on = QtGui.QIcon(resource_path("resources", "icons", "shuffle.svg"))
+        self._icon_shuffle_off = QtGui.QIcon(resource_path("resources", "icons", "shuffle_off.svg"))
+        self.btn_shuffle.setFixedSize(36, 28)
+        self.btn_shuffle.setIconSize(QtCore.QSize(18, 18))
+        self.btn_shuffle.setToolTip("シャッフル再生")
+        self._update_shuffle_button()
 
     # タイトルバーのダーク化（Windows）
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802
@@ -433,6 +448,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         video_files.sort(key=natural_key)
 
         self.directory_playlist = video_files
+
+        # ### 変更点 3/6: シャッフル状態をリセット ###
+        if self.shuffle_enabled:
+            # シャッフルが有効な状態で新しいディレクトリを開いたら、一度無効にする
+            self.shuffle_enabled = False
+            self.shuffled_playlist = []
+            self._update_shuffle_button()
 
         # 渡されたファイルがリストの何番目にあるかを探す
         try:
@@ -502,18 +524,40 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.vlc_events.media_ended.emit()
 
     def _on_media_end(self) -> None:
-        # 単曲リピートを最優先。処理の重複を避けるため遅延して切替。
         if getattr(self, "_ending", False):
             return
         self._ending = True
-        cur = self.current_index
-        total = len(self.directory_playlist)
-        if self.repeat_enabled and 0 <= cur < total:
-            QtCore.QTimer.singleShot(80, lambda idx=cur: self._end_after(idx))
+
+        # ### 変更点 6/7: 再生終了時のロジックを全面的に改修 ###
+        playlist = self._get_current_playlist()
+        if not playlist:
+            self._ending = False
             return
-        if cur + 1 < total:
-            QtCore.QTimer.singleShot(80, lambda idx=cur + 1: self._end_after(idx))
+
+        current_path = self.directory_playlist[self.current_index]
+        try:
+            current_playlist_idx = playlist.index(current_path)
+        except ValueError:
+            self._ending = False
+            return
+            
+        next_playlist_idx = -1
+        # プレイリストの最後に達したか？
+        if current_playlist_idx + 1 < len(playlist):
+            # まだ続きがある -> 次の曲へ
+            next_playlist_idx = current_playlist_idx + 1
+        elif self.repeat_enabled:
+            # 最後に達したが、リピートが有効 -> 最初の曲へ
+            next_playlist_idx = 0
+        
+        if next_playlist_idx != -1:
+            # 次に再生するファイルのパスを取得
+            next_path = playlist[next_playlist_idx]
+            # 元のリストでのインデックスを探す
+            next_original_idx = self.directory_playlist.index(next_path)
+            QtCore.QTimer.singleShot(80, lambda idx=next_original_idx: self._end_after(idx))
         else:
+            # 次に再生する曲がない -> 停止
             self._ending = False
             self.stop()
 
@@ -576,18 +620,40 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.setRange(0, 0)
         self.seek_slider.setValue(0)
         self.seek_slider.blockSignals(False)
+    
+    def _get_current_playlist(self) -> List[str]:
+        """現在の再生モードに応じたプレイリストを返すヘルパーメソッド"""
+        return self.shuffled_playlist if self.shuffle_enabled else self.directory_playlist
 
     def play_next(self) -> None:
-        if not self.directory_playlist:
+        playlist = self._get_current_playlist()
+        if not playlist:
             return
-        if (self.current_index + 1) < len(self.directory_playlist):
-            QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index + 1))
+        # 現在再生中のファイルがシャッフルリストの何番目にあるかを探す
+        current_path = self.directory_playlist[self.current_index]
+        try:
+            shuffled_idx = playlist.index(current_path)
+            if (shuffled_idx + 1) < len(playlist):
+                next_path = playlist[shuffled_idx + 1]
+                # 元のリストでのインデックスを見つけて再生
+                next_original_idx = self.directory_playlist.index(next_path)
+                QtCore.QTimer.singleShot(50, lambda: self.play_at(next_original_idx))
+        except ValueError:
+            pass
 
     def play_previous(self) -> None:
-        if not self.directory_playlist:
+        playlist = self._get_current_playlist()
+        if not playlist:
             return
-        if (self.current_index - 1) >= 0:
-            QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index - 1))
+        current_path = self.directory_playlist[self.current_index]
+        try:
+            shuffled_idx = playlist.index(current_path)
+            if (shuffled_idx - 1) >= 0:
+                prev_path = playlist[shuffled_idx - 1]
+                prev_original_idx = self.directory_playlist.index(prev_path)
+                QtCore.QTimer.singleShot(50, lambda: self.play_at(prev_original_idx))
+        except ValueError:
+            pass
 
     # ------------- 再生操作 -------------
     def toggle_play(self) -> None:
@@ -723,6 +789,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_next_track = mk(QtCore.Qt.Key_PageDown, self.play_next)
         # Rキーでリピート切替（任意）
         self._sc_repeat = mk(QtCore.Qt.Key_R, lambda: self.btn_repeat.toggle())
+        self._sc_shuffle = mk(QtCore.Qt.Key_S, lambda: self.btn_shuffle.toggle())
         # スペースキーで再生/一時停止
         self._sc_space = mk(QtCore.Qt.Key_Space, self.toggle_play)
 
@@ -812,20 +879,26 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._update_play_button()
 
     def _update_window_title(self, filename: Optional[str] = None) -> None:
-        name = filename or (
-            os.path.basename(self.directory_playlist[self.current_index])
-            if 0 <= self.current_index < len(self.directory_playlist)
-            else ""
-        )
-        idx = (self.current_index + 1) if self.current_index >= 0 else 0
-        total = len(self.directory_playlist)
+        playlist = self._get_current_playlist()
+        current_path = self.directory_playlist[self.current_index] if 0 <= self.current_index < len(self.directory_playlist) else ""
+        
+        name = filename or (os.path.basename(current_path) if current_path else "")
+        
+        # シャッフルリスト内でのインデックスを探す
+        try:
+            idx = playlist.index(current_path) + 1 if current_path else 0
+        except ValueError:
+            idx = 0
+            
+        total = len(playlist)
         prefix = f"[{idx}/{total}] " if total else ""
+        shuffle_indicator = "[S] " if self.shuffle_enabled else ""
 
         duration_str = ""
         if self._media_length > 0:
             duration_str = f" [{self._format_ms(self._media_length)}]"
 
-        self.setWindowTitle(f"{prefix}{name}{duration_str}")
+        self.setWindowTitle(f"{shuffle_indicator}{prefix}{name}{duration_str}")
 
     def _update_play_button(self) -> None:
         try:
@@ -911,6 +984,33 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # 押下状態の視覚フィードバック
         self.btn_repeat.setChecked(self.repeat_enabled)
 
+    def _on_shuffle_toggled(self, checked: bool) -> None:
+        self.shuffle_enabled = bool(checked)
+        self._create_or_clear_shuffled_playlist()
+        self._update_shuffle_button()
+        self._update_window_title()
+
+    def _create_or_clear_shuffled_playlist(self):
+        """シャッフルリストを作成またはクリアする"""
+        import random
+        if self.shuffle_enabled and self.directory_playlist:
+            log_message("Shuffle mode enabled. Creating shuffled playlist.")
+            current_path = self.directory_playlist[self.current_index]
+            temp_list = self.directory_playlist[:]
+            temp_list.remove(current_path)
+            random.shuffle(temp_list)
+            self.shuffled_playlist = [current_path] + temp_list
+        else:
+            log_message("Shuffle mode disabled.")
+            self.shuffled_playlist = []
+            
+    # _toggle_shuffleから_update_shuffle_buttonに名前を変更したものを流用
+    def _update_shuffle_button(self):
+        self.btn_shuffle.setIcon(
+            self._icon_shuffle_on if self.shuffle_enabled else self._icon_shuffle_off
+        )
+        self.btn_shuffle.setChecked(self.shuffle_enabled)
+
     def _toggle_mute(self) -> None:
         self._muted = not self._muted
         try:
@@ -988,6 +1088,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # プレイリストから該当ファイルを削除
         self.directory_playlist.pop(index_to_remove)
+        # 2. シャッフルリストからも削除
+        if self.shuffle_enabled and current_file_path in self.shuffled_playlist:
+            self.shuffled_playlist.remove(current_file_path)
 
         # ウィンドウタイトルの表示を更新
         self._update_window_title()

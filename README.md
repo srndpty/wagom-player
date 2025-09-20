@@ -27,6 +27,7 @@
 | `テンキー 4` / `テンキー 1` | 60秒 シーク (Seek 60 seconds) |
 | `PageDown` / `PageUp` | 次の動画 / 前の動画 (Next / Previous Video) |
 | `R` | リピート再生 ON/OFF (Toggle Repeat) |
+| `S` | シャッフル再生 ON/OFF (Toggle Shuffle) |
 | **動画の選別** | |
 | `テンキー 9` | 現在の動画を `_ok` フォルダへ移動し、次を再生 |
 | `テンキー 7` | 現在の動画を `_ng` フォルダへ移動し、次を再生 |

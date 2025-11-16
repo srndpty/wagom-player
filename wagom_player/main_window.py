@@ -79,6 +79,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def __init__(self, file: Optional[str] = None):
         super().__init__()
+        self._is_changing_media = False
+
         self.setWindowTitle("wagom-player")
         self.resize(960, 540)
         self.settings = QtCore.QSettings()
@@ -520,59 +522,133 @@ class VideoPlayer(QtWidgets.QMainWindow):
         em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end)
         self.vlc_events.media_ended.connect(self._on_media_end)
 
+
     def _on_vlc_end(self, event) -> None:
+        log_message(f"_on_vlc_end(): VLC EndReached fired, current_index={self.current_index}")
         self.vlc_events.media_ended.emit()
 
     def _on_media_end(self) -> None:
+        log_message(
+            f"_on_media_end(): ENTER, "
+            f"_ending={getattr(self, '_ending', False)}, "
+            f"current_index={self.current_index}, "
+            f"dir_len={len(self.directory_playlist)}, "
+            f"plist_len={len(self._get_current_playlist())}"
+        )
+
+        # 再生切替中なら無視
+        if getattr(self, "_is_changing_media", False):
+            log_message("_on_media_end(): ignored because _is_changing_media")
+            return
+
+        playlist = self._get_current_playlist()
+        if not playlist:
+            log_message("_on_media_end(): empty playlist")
+            return
+
+        # index が変になってないか一応チェック
+        if not (0 <= self.current_index < len(self.directory_playlist)):
+            log_message(f"_on_media_end(): current_index out of range: {self.current_index}")
+            return
+
+        # ============================
+        # ★ 単曲リピート（repeat_enabled=True）の処理
+        # ============================
+        if self.repeat_enabled:
+            path = self.directory_playlist[self.current_index]
+            log_message(
+                f"_on_media_end(): repeat_enabled=True -> reload same media "
+                f"index={self.current_index}, path={path}"
+            )
+
+            def _restart_current() -> None:
+                try:
+                    # VLC の状態をログしておくと後で分析しやすい
+                    try:
+                        state_before = self.player.get_state()
+                        t_before = self.player.get_time()
+                    except Exception:
+                        state_before = None
+                        t_before = None
+                    log_message(
+                        f"_restart_current(): BEFORE reload "
+                        f"state={state_before}, time={t_before}"
+                    )
+
+                    # ★ 同じパスでメディアを作り直す（stop は呼ばない）
+                    media = self.vlc_instance.media_new(path)
+                    media.parse()
+                    self.player.set_media(media)
+                    self.player.play()
+
+                    # シークバー状態を軽くリセットしておく
+                    self._media_length = -1
+                    self.seek_slider.blockSignals(True)
+                    self.seek_slider.setEnabled(True)
+                    self.seek_slider.setRange(0, 0)
+                    self.seek_slider.setValue(0)
+                    self.seek_slider.blockSignals(False)
+
+                    try:
+                        state_after = self.player.get_state()
+                        t_after = self.player.get_time()
+                    except Exception:
+                        state_after = None
+                        t_after = None
+                    log_message(
+                        f"_restart_current(): AFTER reload "
+                        f"state={state_after}, time={t_after}"
+                    )
+
+                except Exception as e:
+                    log_message(f"_restart_current(): error: {e!r}")
+
+            QtCore.QTimer.singleShot(80, _restart_current)
+            return
+
+
+        # ============================
+        # ★ 通常モード（repeat_enabled=False）：次のファイルへ
+        # ============================
+
         if getattr(self, "_ending", False):
+            log_message("_on_media_end(): ignored because _ending already True")
             return
         self._ending = True
 
-        # ### 変更点 6/7: 再生終了時のロジックを全面的に改修 ###
-        playlist = self._get_current_playlist()
-        if not playlist:
-            self._ending = False
-            return
-
-        current_path = self.directory_playlist[self.current_index]
         try:
-            current_playlist_idx = playlist.index(current_path)
-        except ValueError:
+            current_path = self.directory_playlist[self.current_index]
+            try:
+                current_playlist_idx = playlist.index(current_path)
+            except ValueError:
+                log_message("_on_media_end(): current_path not in playlist")
+                return
+
+            next_playlist_idx = -1
+            if current_playlist_idx + 1 < len(playlist):
+                next_playlist_idx = current_playlist_idx + 1
+
+            if next_playlist_idx != -1:
+                next_path = playlist[next_playlist_idx]
+                next_original_idx = self.directory_playlist.index(next_path)
+                log_message(
+                    f"_on_media_end(): moving to next track idx={next_original_idx}, path={next_path}"
+                )
+                QtCore.QTimer.singleShot(
+                    80, lambda idx=next_original_idx: self._end_after(idx)
+                )
+            else:
+                log_message("_on_media_end(): reached end of playlist (repeat off) -> stop()")
+                self.stop()
+        finally:
+            # 次の曲に進む処理が終わったら _ending を戻す
             self._ending = False
-            return
-            
-        next_playlist_idx = -1
-        # プレイリストの最後に達したか？
-        if current_playlist_idx + 1 < len(playlist):
-            # まだ続きがある -> 次の曲へ
-            next_playlist_idx = current_playlist_idx + 1
-        elif self.repeat_enabled:
-            # 最後に達したが、リピートが有効 -> 最初の曲へ
-            next_playlist_idx = 0
-        
-        if next_playlist_idx != -1:
-            # 次に再生するファイルのパスを取得
-            next_path = playlist[next_playlist_idx]
-            # 元のリストでのインデックスを探す
-            next_original_idx = self.directory_playlist.index(next_path)
-            QtCore.QTimer.singleShot(80, lambda idx=next_original_idx: self._end_after(idx))
-        else:
-            # 次に再生する曲がない -> 停止
-            self._ending = False
-            self.stop()
+
 
     def _end_after(self, idx: int) -> None:
+        log_message(f"_end_after(): idx={idx}, current_index(before)={self.current_index}")
         self._ending = False
-        self.play_at(idx)
-
-    def _on_media_ended_in_qt(self) -> None:
-        # 最後まで到達したらリピート設定に従う
-        if self.current_index + 1 < len(self.directory_playlist):
-            self.play_next()
-        elif self.repeat_enabled:
-            QtCore.QTimer.singleShot(50, lambda: self.play_at(self.current_index))
-        else:
-            self.stop()
+        self._play_at_with_reason(idx, "from_end")
 
     def _bind_video_surface(self) -> None:
         wid = int(self.video_frame.winId())
@@ -587,39 +663,62 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
 
     def play_at(self, index: int) -> None:
+
         if not (0 <= index < len(self.directory_playlist)):
+            log_message("play_at(): index out of range")
             return
         
-        self.duration_overlay_label.hide()
-        self.current_index = index
-        path = self.directory_playlist[index]
-        # 切替安定化のため一旦停止
-        try:
-            self.player.stop()
-        except Exception:
-            pass
-        media = self.vlc_instance.media_new(path)
-        media.parse()
-        self.player.set_media(media)
-
-        QtWidgets.QApplication.processEvents()
-        self._bind_video_surface()
-
-        self.player.play()
-        self._update_window_title(os.path.basename(path))
-        self.status.showMessage(f"再生中: {path}")
-
-        # 新しい動画を再生する際に、シークバーの色を通常に戻す
-        if self._is_seek_bar_warning:
-            self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
-            self._is_seek_bar_warning = False
+        if getattr(self, "_is_changing_media", False):
+            log_message(f"play_at(): SKIP index={index} because _is_changing_media is True")
+            return
+        self._is_changing_media = True
         
-        self._media_length = -1
-        self.seek_slider.blockSignals(True)
-        self.seek_slider.setEnabled(True)
-        self.seek_slider.setRange(0, 0)
-        self.seek_slider.setValue(0)
-        self.seek_slider.blockSignals(False)
+        try:
+            old = self.current_index
+            log_message(f"play_at(): START index={index}, old_index={old}")
+            self.current_index = index
+            path = self.directory_playlist[index]
+            log_message(f"play_at(): path={path}")
+
+            try:
+                log_message("play_at(): before player.stop()")
+                self.player.stop()
+                log_message("play_at(): after player.stop()")
+            except Exception as e:
+                log_message(f"play_at(): player.stop() error: {e}")
+
+            try:
+                log_message("play_at(): before media_new/parse")
+                media = self.vlc_instance.media_new(path)
+                media.parse()  # ← ここで固まるか確認したい
+                log_message("play_at(): after media.parse()")
+                self.player.set_media(media)
+            except Exception as e:
+                log_message(f"play_at(): media setup error: {e}")
+                return
+
+            QtWidgets.QApplication.processEvents()
+            self._bind_video_surface()
+
+            self.player.play()
+            log_message(f"play_at(): player.play() done, current_index={self.current_index}, path={path}")
+            self._update_window_title(os.path.basename(path))
+            self.status.showMessage(f"再生中: {path}")
+
+            # 新しい動画を再生する際に、シークバーの色を通常に戻す
+            if self._is_seek_bar_warning:
+                self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
+                self._is_seek_bar_warning = False
+            
+            self._media_length = -1
+            self.seek_slider.blockSignals(True)
+            self.seek_slider.setEnabled(True)
+            self.seek_slider.setRange(0, 0)
+            self.seek_slider.setValue(0)
+            self.seek_slider.blockSignals(False)
+            log_message("play_at(): end")
+        finally:
+            self._is_changing_media = False
     
     def _get_current_playlist(self) -> List[str]:
         """現在の再生モードに応じたプレイリストを返すヘルパーメソッド"""
@@ -627,19 +726,26 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def play_next(self) -> None:
         playlist = self._get_current_playlist()
+        log_message(f"play_next(): current_index={self.current_index}, playlist_len={len(playlist)}")
         if not playlist:
             return
         # 現在再生中のファイルがシャッフルリストの何番目にあるかを探す
         current_path = self.directory_playlist[self.current_index]
+        log_message(f"play_next(): current_path={current_path}")
         try:
             shuffled_idx = playlist.index(current_path)
             if (shuffled_idx + 1) < len(playlist):
                 next_path = playlist[shuffled_idx + 1]
                 # 元のリストでのインデックスを見つけて再生
                 next_original_idx = self.directory_playlist.index(next_path)
-                QtCore.QTimer.singleShot(50, lambda: self.play_at(next_original_idx))
+                QtCore.QTimer.singleShot(50, lambda: self._play_at_with_reason(next_original_idx, "from_next"))
         except ValueError:
             pass
+        log_message(f"play_next(): scheduling play_at({next_original_idx}) in 50ms")
+
+    def _play_at_with_reason(self, index: int, reason: str) -> None:
+        log_message(f"_play_at_with_reason(): index={index}, reason={reason}")
+        self.play_at(index)
 
     def play_previous(self) -> None:
         playlist = self._get_current_playlist()
@@ -719,14 +825,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
         mods = event.modifiers()
         is_keypad = bool(mods & QtCore.Qt.KeypadModifier)
 
-        if key == QtCore.Qt.Key_Left:
-            self.seek_by(-self.SEEK_SHORT_MS)
-            event.accept()
-            return
-        if key == QtCore.Qt.Key_Right:
-            self.seek_by(self.SEEK_SHORT_MS)
-            event.accept()
-            return
+        # if key == QtCore.Qt.Key_Left:
+        #     self.seek_by(-self.SEEK_SHORT_MS)
+        #     event.accept()
+        #     return
+        # if key == QtCore.Qt.Key_Right:
+        #     self.seek_by(self.SEEK_SHORT_MS)
+        #     event.accept()
+        #     return
 
         if is_keypad and key == QtCore.Qt.Key_4:
             # Num4: 60秒進む
@@ -739,14 +845,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
             event.accept()
             return
 
-        if key == QtCore.Qt.Key_PageUp:
-            self.play_previous()
-            event.accept()
-            return
-        if key == QtCore.Qt.Key_PageDown:
-            self.play_next()
-            event.accept()
-            return
+        # if key == QtCore.Qt.Key_PageUp:
+        #     self.play_previous()
+        #     event.accept()
+        #     return
+        # if key == QtCore.Qt.Key_PageDown:
+        #     self.play_next()
+        #     event.accept()
+        #     return
 
         if is_keypad and key == QtCore.Qt.Key_8:
             self.close()

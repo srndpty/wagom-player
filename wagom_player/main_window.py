@@ -708,7 +708,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                     new_t = end_threshold
 
             if length > 0:
-                new_t = min(new_t, length - 1000)
+                new_t = max(min(new_t, length - 1000), 0)
             self.player.set_time(new_t)
         except Exception:
             pass

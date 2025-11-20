@@ -2,6 +2,9 @@ import os
 import sys
 import shutil
 import re
+import ctypes
+import functools
+import locale
 from typing import List, Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -22,6 +25,49 @@ def natural_key(path: str):
     name = os.path.basename(path)
     parts = re.split(r"(\d+)", name)
     return [int(p) if p.isdigit() else p.casefold() for p in parts]
+
+
+def _load_windows_logical_comparer():
+    if not sys.platform.startswith("win"):
+        return None
+
+    try:
+        shlwapi = ctypes.windll.Shlwapi
+    except Exception:
+        return None
+
+    try:
+        cmp_func = shlwapi.StrCmpLogicalW
+        cmp_func.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+        cmp_func.restype = ctypes.c_int
+    except Exception:
+        return None
+
+    return cmp_func
+
+
+_STRCMP_LOGICALW = _load_windows_logical_comparer()
+
+
+def _create_windows_logical_key(comparer=_STRCMP_LOGICALW):
+    """Windowsの論理順比較に基づくキーを生成する。"""
+
+    if comparer:
+        def _cmp(a: str, b: str) -> int:
+            return comparer(os.path.basename(a), os.path.basename(b))
+
+        return functools.cmp_to_key(_cmp)
+
+    locale_transform = locale.strxfrm
+
+    def _fallback_key(path: str):
+        name = os.path.basename(path)
+        return (locale_transform(name.casefold()), natural_key(path))
+
+    return _fallback_key
+
+
+windows_logical_key = _create_windows_logical_key()
 
 def _create_vlc_instance() -> "vlc.Instance":
     lib_path = os.environ.get("PYTHON_VLC_LIB_PATH")
@@ -446,8 +492,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             # 動画が1つも見つからない場合でも、指定されたファイルだけは再生する
             video_files = [file_path]
 
-        # 自然順ソート
-        video_files.sort(key=natural_key)
+        # Windowsの論理順（または可能な限り近い順序）でソート
+        video_files.sort(key=windows_logical_key)
 
         self.directory_playlist = video_files
 

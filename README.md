@@ -73,6 +73,5 @@ pip install -r requirements.txt
 python app.py "C:\path\to\video1.mp4"
 ```
 
-
 ## ライセンス
 MIT.

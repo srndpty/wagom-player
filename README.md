@@ -59,7 +59,7 @@ pip install -r requirements.txt
 
 ## 使い方
 
-### 実行可能ファイルの場合
+### ビルド方法・実行可能ファイルの場合
 - `scripts/build_windows.bat` を実行
 - `dist/wagom-player` に実行可能ファイルと`_internal`フォルダができるので、両方 `C:\Program Files\wagom-player` にコピー
 - `windows/file-associations.reg` を実行
@@ -71,10 +71,6 @@ pip install -r requirements.txt
 ### コマンドラインからの場合
 ```bash
 python app.py "C:\path\to\video1.mp4"
-```
-## ビルド方法
-```
-pyinstaller -y wagom-player.spec
 ```
 
 ## ライセンス

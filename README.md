@@ -72,7 +72,10 @@ pip install -r requirements.txt
 ```bash
 python app.py "C:\path\to\video1.mp4"
 ```
-
+## ビルド方法
+```
+pyinstaller -y wagom-player.spec
+```
 
 ## ライセンス
 MIT.

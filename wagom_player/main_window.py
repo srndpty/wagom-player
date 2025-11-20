@@ -72,8 +72,8 @@ windows_logical_key = _create_windows_logical_key()
 def _create_vlc_instance() -> "vlc.Instance":
     lib_path = os.environ.get("PYTHON_VLC_LIB_PATH")
     if lib_path and os.path.isdir(lib_path):
-        return vlc.Instance([f"--plugin-path={lib_path}"])  # type: ignore[arg-type]
-    return vlc.Instance()
+        return vlc.Instance([f"--plugin-path={lib_path}", "--audio-time-stretch"])
+    return vlc.Instance(["--audio-time-stretch"])
 
 class MetadataDialog(QtWidgets.QDialog):
     """メタデータを表示・コピーするためのダイアログ"""
@@ -126,6 +126,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def __init__(self, file: Optional[str] = None):
         super().__init__()
         self._is_changing_media = False
+        self.playback_rate_min = 0.25
+        self.playback_rate_max = 4.0
+        self.playback_rate = 1.0
 
         self.setWindowTitle("wagom-player")
         self.resize(960, 540)
@@ -253,6 +256,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
         except Exception:
             pass
         self._update_volume_label()
+        try:
+            self.player.set_rate(self.playback_rate)
+        except Exception:
+            pass
 
         # ショートカット
         self._setup_shortcuts()
@@ -746,6 +753,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents()
             self._bind_video_surface()
 
+            try:
+                self.player.set_rate(self.playback_rate)
+            except Exception:
+                pass
+
             self.player.play()
             log_message(f"play_at(): player.play() done, current_index={self.current_index}, path={path}")
             self._update_window_title(os.path.basename(path))
@@ -944,6 +956,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._sc_shuffle = mk(QtCore.Qt.Key_S, lambda: self.btn_shuffle.toggle())
         # スペースキーで再生/一時停止
         self._sc_space = mk(QtCore.Qt.Key_Space, self.toggle_play)
+        self._sc_speed_up = mk(QtCore.Qt.Key_C, lambda: self._change_playback_rate(+0.1))
+        self._sc_speed_up.setAutoRepeat(True)
+        self._sc_speed_down = mk(QtCore.Qt.Key_X, lambda: self._change_playback_rate(-0.1))
+        self._sc_speed_down.setAutoRepeat(True)
 
         # Num 9: "_ok" フォルダに移動
         self._sc_move_ok = QtWidgets.QShortcut(
@@ -988,7 +1004,17 @@ class VideoPlayer(QtWidgets.QMainWindow):
         m, s = divmod(s, 60)
         h, m = divmod(m, 60)
         return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
-    
+
+    def _show_overlay(self, text: str, duration_ms: int = 1500) -> None:
+        """オーバーレイラベルにテキストを表示し、一定時間後に非表示にする"""
+        self.duration_overlay_label.setText(text)
+        self._update_overlay_geometry()
+        self.duration_overlay_label.show()
+        self.duration_overlay_label.raise_()
+        self.duration_overlay_timer.stop()
+        self.duration_overlay_timer.setInterval(duration_ms)
+        self.duration_overlay_timer.start()
+
     # ------------- ステータス更新 -------------
     def _update_status_time(self) -> None:
         if not self.player:
@@ -1006,12 +1032,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self.seek_slider.blockSignals(False)
                 self._update_window_title()
                 formatted_time = self._format_ms(total)
-                self.duration_overlay_label.setText(formatted_time)
-
-                self._update_overlay_geometry()
-                self.duration_overlay_label.show() # 表示
-                self.duration_overlay_label.raise_()   # 最前面に移動
-                self.duration_overlay_timer.start() # 非表示タイマースタート
+                self._show_overlay(formatted_time)
             
             if not self._seeking_user:
                 self.seek_slider.blockSignals(True)
@@ -1099,6 +1120,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    # ------------- 再生速度操作 -------------
+    def _change_playback_rate(self, delta: float) -> None:
+        new_rate = max(
+            self.playback_rate_min, min(self.playback_rate_max, self.playback_rate + delta)
+        )
+        try:
+            self.player.set_rate(new_rate)
+        except Exception:
+            pass
+        self.playback_rate = new_rate
+        self._show_overlay(f"[再生速度:{new_rate:.1f}倍]")
+
     # ------------- 音量操作 -------------
     def _on_volume_changed(self, value: int) -> None:
         try:
@@ -1106,12 +1139,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         except Exception:
             pass
         self._update_volume_label()
+        self._show_overlay(f"[ボリューム:{int(value)}%]")
 
     def _adjust_volume(self, delta: int) -> None:
         v = int(self.volume_slider.value())
         nv = max(0, min(100, v + delta))
         if nv != v:
             self.volume_slider.setValue(nv)
+        else:
+            self._show_overlay(f"[ボリューム:{nv}%]")
 
     def _on_volume_clicked(self, value: int) -> None:
         # クリック位置を即時反映（valueChangedで反映される）

@@ -858,17 +858,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
             length = self.player.get_length()
             if t == -1 or length <= 0:
                 return
-            
+
             new_t = max(0, t + delta_ms)
 
-            # 60秒進めるショートカット(delta_ms > 0)の場合のみ特別処理をチェック
-            if delta_ms > 0 and delta_ms == self.SEEK_LONG_MS:
-                # 動画終了10秒前の時間（ミリ秒）を計算
-                end_threshold = length - 10000
-
-                # 移動先が終了10秒前を過ぎてしまう場合
+            # ★ 前方向のシークは、動画終端10秒前より先には行かない
+            if delta_ms > 0 and length > 0:
+                # 動画終了10秒前（ミリ秒）
+                end_threshold = max(0, length - 10_000)
                 if new_t > end_threshold:
-                    # 移動先を、ちょうど終了10秒前の位置に設定する
                     new_t = end_threshold
 
             if length > 0:
@@ -1235,6 +1232,17 @@ class VideoPlayer(QtWidgets.QMainWindow):
         index_to_remove = self.current_index
         current_file_path = self.directory_playlist[index_to_remove]
 
+        # ★ シャッフル時に「シャッフル順の次」を覚えておく
+        next_path = None
+        if self.shuffle_enabled:
+            playlist = self._get_current_playlist()
+            try:
+                cur_in_playlist = playlist.index(current_file_path)
+            except ValueError:
+                cur_in_playlist = -1
+            if cur_in_playlist != -1 and cur_in_playlist + 1 < len(playlist):
+                next_path = playlist[cur_in_playlist + 1]
+
         # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
         log_message("Stopping playback to release file lock...")
         self.stop()
@@ -1283,20 +1291,32 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # ウィンドウタイトルの表示を更新
         self._update_window_title()
 
+        # もう再生できるものがない
         if not self.directory_playlist:
             log_message("Playlist is now empty. Playback remains stopped.")
-            self.stop()  # 念のため再度stopを呼び、UIを停止状態に保つ
+            self.stop()
+            return
+
+        # 次に再生する index を決定
+        next_index = None
+
+        if self.shuffle_enabled and next_path is not None:
+            # シャッフルリストで「次」だったパスを、ソート済みリスト上のインデックスに変換
+            if next_path in self.directory_playlist:
+                next_index = self.directory_playlist.index(next_path)
+        elif not self.shuffle_enabled:
+            # 通常モードでは、今の位置 index_to_remove に来たファイルをそのまま再生
+            if index_to_remove < len(self.directory_playlist):
+                next_index = index_to_remove
+
+        if next_index is None:
+            log_message("No next item to play after move. Playback remains stopped.")
+            self.stop()
         else:
-            if index_to_remove >= len(self.directory_playlist):
-                log_message(
-                    "Last item in playlist was moved. Playback remains stopped."
-                )
-                self.stop()  # 最後のアイテムを消した場合も停止状態を維持
-            else:
-                # 削除したアイテムの位置に次のアイテムが来たので、同じインデックスで再生を開始
-                log_message(f"Playing next item at index {index_to_remove}.")
-                # 少しディレイを入れると、UIの応答性が良くなることがある
-                QtCore.QTimer.singleShot(50, lambda: self.play_at(index_to_remove))
+            log_message(f"Playing next item at index {next_index}.")
+            QtCore.QTimer.singleShot(
+                50, lambda idx=next_index: self.play_at(idx)
+            )
                 
     def _update_overlay_geometry(self):
         """

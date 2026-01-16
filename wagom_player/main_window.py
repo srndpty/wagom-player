@@ -20,6 +20,26 @@ except ImportError as e:
         "python-vlc が見つかりません。`pip install python-vlc` を実行してください"
     ) from e
 
+SUPPORTED_VIDEO_EXTENSIONS = (
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".ts",
+    ".m4v",
+    ".3gp",
+    ".3g2",
+    ".mpeg",
+    ".mpg",
+    ".mpe",
+    ".rm",
+    ".rmvb",
+    ".vob",
+    ".webm",
+)
+
 def natural_key(path: str):
     """ファイル名を自然順ソートするためのキーを生成する (例: 2.mp4 < 10.mp4)"""
     name = os.path.basename(path)
@@ -476,11 +496,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         log_message(f"Scanning directory: {directory}")
 
         # サポートする動画ファイルの拡張子
-        supported_extensions = {
-            ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv",
-            ".ts", ".m4v", ".3gp", ".3g2", ".mpeg", ".mpg",
-            ".mpe", ".rm", ".rmvb", ".vob", ".webm"
-        }
+        supported_extensions = set(SUPPORTED_VIDEO_EXTENSIONS)
 
         # ディレクトリをスキャンし、動画ファイルだけをフィルタリング
         try:
@@ -1207,11 +1223,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
     # ------------- ファイルダイアログ -------------
     def open_files_dialog(self) -> None:
         start_dir = self.settings.value("last_dir", os.path.expanduser("~"))
+        supported_patterns = " ".join(f"*{ext}" for ext in SUPPORTED_VIDEO_EXTENSIONS)
+        file_filter = f"動画ファイル ({supported_patterns});;すべてのファイル (*.*)"
         file, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "動画ファイルを選択",
             start_dir,
-            "動画ファイル (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.ts *.m4v *.3gp *.3g2 *.mpeg *.mpg *.mpe *.rm *.rmvb *.vob *.webm);;すべてのファイル (*.*)",
+            file_filter,
         )
         if file:
             try:

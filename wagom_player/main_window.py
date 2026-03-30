@@ -803,6 +803,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         log_message(f"play_next(): current_index={self.current_index}, playlist_len={len(playlist)}")
         if not playlist:
             return
+        if not (0 <= self.current_index < len(self.directory_playlist)):
+            log_message("play_next(): current_index is out of range")
+            return
         # 現在再生中のファイルがシャッフルリストの何番目にあるかを探す
         current_path = self.directory_playlist[self.current_index]
         log_message(f"play_next(): current_path={current_path}")
@@ -813,9 +816,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 # 元のリストでのインデックスを見つけて再生
                 next_original_idx = self.directory_playlist.index(next_path)
                 QtCore.QTimer.singleShot(50, lambda: self._play_at_with_reason(next_original_idx, "from_next"))
+                log_message(f"play_next(): scheduling play_at({next_original_idx}) in 50ms")
+            else:
+                log_message("play_next(): already at end of playlist")
         except ValueError:
-            pass
-        log_message(f"play_next(): scheduling play_at({next_original_idx}) in 50ms")
+            log_message("play_next(): current path was not found in playlist")
 
     def _play_at_with_reason(self, index: int, reason: str) -> None:
         log_message(f"_play_at_with_reason(): index={index}, reason={reason}")

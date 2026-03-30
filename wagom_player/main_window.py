@@ -802,10 +802,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         playlist = self._get_current_playlist()
         log_message(f"play_next(): current_index={self.current_index}, playlist_len={len(playlist)}")
         if not playlist:
+            log_message("play_next(): playlist is empty -> skip")
+            return
+        if not (0 <= self.current_index < len(self.directory_playlist)):
+            log_message("play_next(): current_index is out of range -> skip")
             return
         # 現在再生中のファイルがシャッフルリストの何番目にあるかを探す
         current_path = self.directory_playlist[self.current_index]
         log_message(f"play_next(): current_path={current_path}")
+        next_original_idx: Optional[int] = None
         try:
             shuffled_idx = playlist.index(current_path)
             if (shuffled_idx + 1) < len(playlist):
@@ -814,8 +819,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 next_original_idx = self.directory_playlist.index(next_path)
                 QtCore.QTimer.singleShot(50, lambda: self._play_at_with_reason(next_original_idx, "from_next"))
         except ValueError:
-            pass
-        log_message(f"play_next(): scheduling play_at({next_original_idx}) in 50ms")
+            log_message("play_next(): current_path was not found in playlist -> skip")
+
+        if next_original_idx is not None:
+            log_message(f"play_next(): scheduling play_at({next_original_idx}) in 50ms")
+        else:
+            log_message("play_next(): no next item (already at end of playlist) -> skip")
 
     def _play_at_with_reason(self, index: int, reason: str) -> None:
         log_message(f"_play_at_with_reason(): index={index}, reason={reason}")

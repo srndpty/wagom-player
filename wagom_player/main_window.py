@@ -252,6 +252,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # プレイリスト
         self.directory_playlist: List[str] = [] # ディレクトリ内の動画リスト
         self.current_index: int = -1
+        self._last_external_file_path: str = ""
+        self._last_external_file_msec: int = 0
 
         # タイマー
         self.timer = QtCore.QTimer(self)
@@ -290,6 +292,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # 起動時にファイルが渡された場合、そのファイルをロードする
         if file:
             self._load_file_and_directory(file)
+            self._remember_external_file(file)
             
 
     # ---------------- UI ----------------
@@ -540,6 +543,46 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # 再生開始
         self.play_at(self.current_index)
+
+    def open_external_file(self, file_path: str) -> None:
+        """別プロセスから渡されたファイルを既存ウィンドウで開く。"""
+        self._bring_to_front()
+
+        if not file_path:
+            return
+
+        if not os.path.isfile(file_path):
+            log_message(f"External open ignored because file does not exist: {file_path}")
+            self.status.showMessage(f"ファイルが見つかりません: {file_path}", 5000)
+            return
+
+        normalized = self._normalize_external_file_path(file_path)
+        now = QtCore.QDateTime.currentMSecsSinceEpoch()
+        if (
+            normalized == self._last_external_file_path
+            and now - self._last_external_file_msec < 3000
+        ):
+            log_message(f"Duplicate external open ignored: {file_path}")
+            self.status.showMessage("同じファイルの連続起動を無視しました", 2500)
+            return
+
+        self._load_file_and_directory(file_path)
+        self._remember_external_file(file_path)
+
+    def _remember_external_file(self, file_path: str) -> None:
+        self._last_external_file_path = self._normalize_external_file_path(file_path)
+        self._last_external_file_msec = QtCore.QDateTime.currentMSecsSinceEpoch()
+
+    def _normalize_external_file_path(self, file_path: str) -> str:
+        return os.path.normcase(os.path.abspath(os.path.normpath(file_path)))
+
+    def _bring_to_front(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+        self.raise_()
+        self.activateWindow()
 
     # --------------- 設定保存/復元 ---------------
     def _load_settings(self) -> None:

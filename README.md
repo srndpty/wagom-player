@@ -68,6 +68,27 @@ pip install -r requirements.txt
 - wagom-playerを選択して各拡張子をwagomに規定値を手動で設定（windows8以降、マルウェア対策で自動設定できなくなってるらしい）
 - あとvlcが対応してるフォーマットなら対応してるので必要に応じて既定のアプリ設定
 
+#### Windows版の更新ビルド手順
+
+既に `C:\Program Files\wagom-player` に配置済みの場合は、次の手順で更新できます。
+
+```bat
+scripts\build_windows.bat
+```
+
+ビルドが成功したら、`dist\wagom-player` の中身を `C:\Program Files\wagom-player` に上書きコピーします。`build_windows.bat` はビルド前に起動中の `wagom-player.exe` を終了し、古い `dist` / `build` を削除してから PyInstaller で作り直します。
+
+この版ではアプリを単一インスタンス化しています。動画ファイルを連続で開いても2個目以降の `wagom-player.exe` は既存ウィンドウへファイルパスを渡して終了します。同じファイルを短時間に連続して開いた場合は再読み込みを抑止するため、Enterキー押しっぱなしでもプロセスが大量に増えません。
+
+更新後の簡易確認:
+
+```bat
+C:\Program Files\wagom-player\wagom-player.exe "C:\path\to\video1.mp4"
+C:\Program Files\wagom-player\wagom-player.exe "C:\path\to\video1.mp4"
+```
+
+タスクマネージャーで `wagom-player.exe` が1つだけ残っていれば対策が効いています。
+
 ### コマンドラインからの場合
 ```bash
 python app.py "C:\path\to\video1.mp4"

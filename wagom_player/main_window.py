@@ -133,6 +133,47 @@ class MetadataDialog(QtWidgets.QDialog):
         self.copy_button.setText("コピーしました！")
         QtCore.QTimer.singleShot(1500, lambda: self.copy_button.setText("クリップボードにコピー"))
 
+
+class ShortcutListDialog(QtWidgets.QDialog):
+    """ショートカット一覧を表示するダイアログ"""
+
+    def __init__(self, shortcut_rows: List[tuple], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("ショートカット一覧")
+        self.setMinimumSize(520, 480)
+
+        table = QtWidgets.QTableWidget(self)
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["ショートカット", "操作", "分類"])
+        table.setRowCount(len(shortcut_rows))
+        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        table.setAlternatingRowColors(True)
+
+        for row, (key, description, category) in enumerate(shortcut_rows):
+            for col, value in enumerate((key, description, category)):
+                item = QtWidgets.QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~QtCore.Qt.ItemIsEditable)
+                table.setItem(row, col, item)
+
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        table.verticalHeader().setVisible(False)
+
+        close_button = QtWidgets.QPushButton("閉じる")
+        close_button.clicked.connect(self.accept)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(close_button)
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.addWidget(table)
+        main_layout.addLayout(button_layout)
+
+
 class VlcEvents(QtCore.QObject):
     media_ended = QtCore.pyqtSignal()
 
@@ -406,6 +447,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         act_open = menu.addAction("開く...")
         act_open.setShortcut("Ctrl+O")
         act_open.triggered.connect(self.open_files_dialog)
+        act_copy_filename = menu.addAction("現在のファイル名をコピー")
+        act_copy_filename.setShortcut("Ctrl+C")
+        act_copy_filename.setShortcutContext(QtCore.Qt.ApplicationShortcut)
+        act_copy_filename.triggered.connect(self.copy_current_filename_to_clipboard)
+
+        help_menu = self.menuBar().addMenu("ヘルプ")
+        act_shortcuts = help_menu.addAction("ショートカット一覧")
+        act_shortcuts.setShortcut("F1")
+        act_shortcuts.setShortcutContext(QtCore.Qt.ApplicationShortcut)
+        act_shortcuts.triggered.connect(self._show_shortcut_list_dialog)
 
         # ドロップ
         self.setAcceptDrops(True)
@@ -981,6 +1032,31 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # ------------- グローバルショートカット -------------
     def _setup_shortcuts(self) -> None:
+        self._shortcut_rows = [
+            ("Ctrl+O", "動画ファイルを開く", "ファイル"),
+            ("Ctrl+C", "現在再生中のファイル名をコピー", "ファイル"),
+            ("F1", "ショートカット一覧を表示", "ヘルプ"),
+            ("Space", "再生 / 一時停止", "再生"),
+            ("Left", "10秒戻る", "シーク"),
+            ("Right", "10秒進む", "シーク"),
+            ("Num 1", "60秒戻る", "シーク"),
+            ("Num 4", "60秒進む", "シーク"),
+            ("Page Up", "前の動画へ", "再生"),
+            ("Page Down", "次の動画へ", "再生"),
+            ("Up", "音量を10%上げる", "音量"),
+            ("Down", "音量を10%下げる", "音量"),
+            ("M", "ミュート切替", "音量"),
+            ("R", "リピート切替", "再生"),
+            ("S", "シャッフル切替", "再生"),
+            ("X", "再生速度を0.1倍下げる", "再生速度"),
+            ("C", "再生速度を0.1倍上げる", "再生速度"),
+            ("I", "メタデータを表示", "情報"),
+            ("Num 0", "最大化", "ウィンドウ"),
+            ("Num 7", "_ng フォルダへ移動して次を再生", "ファイル整理"),
+            ("Num 8", "終了", "ウィンドウ"),
+            ("Num 9", "_ok フォルダへ移動して次を再生", "ファイル整理"),
+        ]
+
         def mk(key, handler):
             sc = QtWidgets.QShortcut(QtGui.QKeySequence(key), self)
             sc.setContext(QtCore.Qt.ApplicationShortcut)
@@ -1035,6 +1111,27 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # Iキーでメタデータ情報表示
         self._sc_metadata = mk(QtCore.Qt.Key_I, self._show_metadata_dialog)
+
+    def _current_file_path(self) -> str:
+        if 0 <= self.current_index < len(self.directory_playlist):
+            return self.directory_playlist[self.current_index]
+        return ""
+
+    def copy_current_filename_to_clipboard(self) -> None:
+        """現在再生中のファイル名だけをクリップボードにコピーする"""
+        current_path = self._current_file_path()
+        if not current_path:
+            self.status.showMessage("再生中のファイルがありません", 3000)
+            return
+
+        filename = os.path.basename(current_path)
+        QtWidgets.QApplication.clipboard().setText(filename)
+        self.status.showMessage(f"ファイル名をコピーしました: {filename}", 3000)
+        self._show_overlay("[ファイル名をコピー]")
+
+    def _show_shortcut_list_dialog(self) -> None:
+        dialog = ShortcutListDialog(self._shortcut_rows, self)
+        dialog.exec_()
 
     # ------------- D&D -------------
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802

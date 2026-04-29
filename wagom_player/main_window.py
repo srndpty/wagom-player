@@ -4,7 +4,6 @@ import shutil
 import re
 import ctypes
 import functools
-import locale
 from typing import List, Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -78,11 +77,8 @@ def _create_windows_logical_key(comparer=_STRCMP_LOGICALW):
 
         return functools.cmp_to_key(_cmp)
 
-    locale_transform = locale.strxfrm
-
     def _fallback_key(path: str):
-        name = os.path.basename(path)
-        return (locale_transform(name.casefold()), natural_key(path))
+        return natural_key(path)
 
     return _fallback_key
 

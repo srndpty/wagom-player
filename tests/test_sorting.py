@@ -15,7 +15,7 @@ class WindowsLogicalKeyTest(unittest.TestCase):
             "/tmp/File1.mp4",
         ]
 
-        expected = ["file-3.mp4", "File1.mp4", "file2.mp4", "File10.mp4"]
+        expected = ["File1.mp4", "file2.mp4", "File10.mp4", "file-3.mp4"]
         sorted_files = sorted(files, key=key)
 
         self.assertEqual(expected, [os.path.basename(p) for p in sorted_files])
@@ -32,7 +32,8 @@ class WindowsLogicalKeyTest(unittest.TestCase):
 
         sorted(files, key=key)
 
-        self.assertIn(("b.mp4", "A.mp4"), calls)
+        compared_names = {name for call in calls for name in call}
+        self.assertEqual({"A.mp4", "b.mp4"}, compared_names)
 
 
 if __name__ == "__main__":

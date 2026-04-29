@@ -5,6 +5,32 @@ from wagom_player import main_window
 
 
 class WindowsLogicalKeyTest(unittest.TestCase):
+    def test_observed_video_extensions_are_supported(self):
+        observed_video_extensions = {
+            ".mp4",
+            ".mov",
+            ".avi",
+            ".3gp",
+            ".mpg",
+            ".wmv",
+            ".mkv",
+            ".flv",
+            ".rmvb",
+            ".asf",
+            ".mpeg",
+            ".webm",
+            ".rm",
+            ".m4v",
+            ".m2ts",
+            ".ts",
+            ".vob",
+            ".3g2",
+        }
+
+        self.assertTrue(
+            observed_video_extensions.issubset(main_window.SUPPORTED_VIDEO_EXTENSIONS)
+        )
+
     def test_fallback_key_prefers_case_insensitive_natural_order(self):
         key = main_window._create_windows_logical_key(None)
 

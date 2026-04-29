@@ -35,6 +35,17 @@ def _find_initial_file(argv: List[str]) -> Optional[str]:
     return None
 
 
+def _configure_runtime_environment() -> None:
+    if getattr(sys, "frozen", False):
+        os.chdir(os.path.dirname(sys.executable))
+
+    log_message(f"argv={sys.argv!r}")
+    log_message(f"cwd={os.getcwd()!r}")
+    log_message(f"executable={sys.executable!r}")
+    log_message(f"frozen={bool(getattr(sys, 'frozen', False))}")
+    log_message(f"PYTHON_VLC_LIB_PATH={os.environ.get('PYTHON_VLC_LIB_PATH', '')!r}")
+
+
 def _send_to_existing_instance(file_path: Optional[str], timeout_ms: int = 500) -> bool:
     socket = QtNetwork.QLocalSocket()
     socket.connectToServer(SINGLE_INSTANCE_SERVER_NAME, QtCore.QIODevice.WriteOnly)
@@ -130,12 +141,15 @@ def main_wrapper(argv: List[str]) -> int:
         return 1
 
 def main(argv: List[str]) -> int:
+    _configure_runtime_environment()
+
     # --- 基本的なアプリケーション設定 ---
     app = QtWidgets.QApplication(argv)
     QtCore.QCoreApplication.setOrganizationName("wagom")
     QtCore.QCoreApplication.setApplicationName("wagom-player")
 
     initial_file = _find_initial_file(argv)
+    log_message(f"initial_file={initial_file!r}")
     if _send_to_existing_instance(initial_file):
         log_message("Existing wagom-player instance found. Forwarded request and exiting.")
         return 0

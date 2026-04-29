@@ -160,7 +160,6 @@ def main(argv: List[str]) -> int:
     icon = apply_app_icon(app)
 
     # VideoPlayerウィンドウを作成し、単一のファイルパスを渡す
-    print(f"Initial file: {initial_file}")
     player_window = VideoPlayer(file=initial_file)
     player_window.setWindowIcon(icon)
     if single_instance_server is not None:

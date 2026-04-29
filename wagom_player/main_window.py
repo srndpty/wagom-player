@@ -1,14 +1,24 @@
 import os
 import sys
-import shutil
-import re
-import ctypes
-import functools
 from typing import List, Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from .dialogs import MetadataDialog, ShortcutListDialog
+from .file_actions import (
+    TargetFileExistsError,
+    move_file_to_subfolder,
+    target_path_for_subfolder,
+)
+from .overlay import OverlayLabel
+from .playlist import (
+    SUPPORTED_VIDEO_EXTENSIONS,
+    _create_windows_logical_key,
+    collect_video_files,
+    natural_key,
+)
 from .seek_slider import SeekSlider
+from .shortcuts import SHORTCUT_ROWS
 from .theme import resource_path
 from .logger import log_message
 
@@ -19,159 +29,11 @@ except ImportError as e:
         "python-vlc が見つかりません。`pip install python-vlc` を実行してください"
     ) from e
 
-SUPPORTED_VIDEO_EXTENSIONS = (
-    ".mp4",
-    ".mkv",
-    ".avi",
-    ".mov",
-    ".wmv",
-    ".flv",
-    ".asf",
-    ".ts",
-    ".m2ts",
-    ".m4v",
-    ".3gp",
-    ".3g2",
-    ".mpeg",
-    ".mpg",
-    ".mpe",
-    ".rm",
-    ".rmvb",
-    ".vob",
-    ".webm",
-)
-
-def natural_key(path: str):
-    """ファイル名を自然順ソートするためのキーを生成する (例: 2.mp4 < 10.mp4)"""
-    name = os.path.basename(path)
-    parts = re.split(r"(\d+)", name)
-    return [int(p) if p.isdigit() else p.casefold() for p in parts]
-
-
-def _load_windows_logical_comparer():
-    if not sys.platform.startswith("win"):
-        return None
-
-    try:
-        shlwapi = ctypes.windll.Shlwapi
-    except Exception:
-        return None
-
-    try:
-        cmp_func = shlwapi.StrCmpLogicalW
-        cmp_func.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
-        cmp_func.restype = ctypes.c_int
-    except Exception:
-        return None
-
-    return cmp_func
-
-
-_STRCMP_LOGICALW = _load_windows_logical_comparer()
-
-
-def _create_windows_logical_key(comparer=_STRCMP_LOGICALW):
-    """Windowsの論理順比較に基づくキーを生成する。"""
-
-    if comparer:
-        def _cmp(a: str, b: str) -> int:
-            return comparer(os.path.basename(a), os.path.basename(b))
-
-        return functools.cmp_to_key(_cmp)
-
-    def _fallback_key(path: str):
-        return natural_key(path)
-
-    return _fallback_key
-
-
-windows_logical_key = _create_windows_logical_key()
-
 def _create_vlc_instance() -> "vlc.Instance":
     lib_path = os.environ.get("PYTHON_VLC_LIB_PATH")
     if lib_path and os.path.isdir(lib_path):
         return vlc.Instance([f"--plugin-path={lib_path}", "--audio-time-stretch"])
     return vlc.Instance(["--audio-time-stretch"])
-
-class MetadataDialog(QtWidgets.QDialog):
-    """メタデータを表示・コピーするためのダイアログ"""
-    def __init__(self, metadata_text: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("動画ファイルのメタデータ")
-        self.setMinimumSize(500, 400)
-
-        # --- UI要素の作成 ---
-        # メタデータ表示用のテキストエリア (読み取り専用)
-        self.text_edit = QtWidgets.QPlainTextEdit(self)
-        self.text_edit.setPlainText(metadata_text)
-        self.text_edit.setReadOnly(True)
-        self.text_edit.setFont(QtGui.QFont("Courier New", 10)) # 等幅フォントで見やすく
-
-        # ボタン
-        self.copy_button = QtWidgets.QPushButton("クリップボードにコピー")
-        self.close_button = QtWidgets.QPushButton("閉じる")
-
-        # --- レイアウト設定 ---
-        button_layout = QtWidgets.QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.copy_button)
-        button_layout.addWidget(self.close_button)
-
-        main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.addWidget(self.text_edit)
-        main_layout.addLayout(button_layout)
-
-        # --- シグナル接続 ---
-        self.copy_button.clicked.connect(self._copy_to_clipboard)
-        self.close_button.clicked.connect(self.accept) # ダイアログを閉じる
-
-    def _copy_to_clipboard(self):
-        """テキストエリアの内容をクリップボードにコピーする"""
-        clipboard = QtWidgets.QApplication.clipboard()
-        clipboard.setText(self.text_edit.toPlainText())
-        # ユーザーにフィードバック
-        self.copy_button.setText("コピーしました！")
-        QtCore.QTimer.singleShot(1500, lambda: self.copy_button.setText("クリップボードにコピー"))
-
-
-class ShortcutListDialog(QtWidgets.QDialog):
-    """ショートカット一覧を表示するダイアログ"""
-
-    def __init__(self, shortcut_rows: List[tuple], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("ショートカット一覧")
-        self.setMinimumSize(520, 480)
-
-        table = QtWidgets.QTableWidget(self)
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["ショートカット", "操作", "分類"])
-        table.setRowCount(len(shortcut_rows))
-        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        table.setAlternatingRowColors(True)
-
-        for row, (key, description, category) in enumerate(shortcut_rows):
-            for col, value in enumerate((key, description, category)):
-                item = QtWidgets.QTableWidgetItem(value)
-                item.setFlags(item.flags() & ~QtCore.Qt.ItemIsEditable)
-                table.setItem(row, col, item)
-
-        header = table.horizontalHeader()
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        table.verticalHeader().setVisible(False)
-
-        close_button = QtWidgets.QPushButton("閉じる")
-        close_button.clicked.connect(self.accept)
-
-        button_layout = QtWidgets.QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(close_button)
-
-        main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.addWidget(table)
-        main_layout.addLayout(button_layout)
 
 
 class VlcEvents(QtCore.QObject):
@@ -199,7 +61,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.vlc_events = VlcEvents()
         self._attach_vlc_events()
 
-        # ### 変更点 1/6: シャッフル関連の変数を追加 ###
         self.repeat_enabled: bool = False
         self.shuffle_enabled: bool = False
         self.shuffled_playlist: List[str] = []
@@ -207,37 +68,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # UI
         self._build_ui()
 
-        # ### 変更点 1/5: オーバーレイ用ラベルとタイマーを追加 ###
-        # 1. オーバーレイ表示用のラベルを作成 (video_frameの子だと表示されない)
-        self.duration_overlay_label = QtWidgets.QLabel(self)
-        self.duration_overlay_label.setWindowFlags(
-            QtCore.Qt.FramelessWindowHint | # ウィンドウの枠を消す
-            QtCore.Qt.Tool |                # タスクバーに表示させない
-            QtCore.Qt.WindowStaysOnTopHint  # 常に最前面に表示するヒント
-        )
-        self.duration_overlay_label.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-        self.duration_overlay_label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
-        self.duration_overlay_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
-        self.duration_overlay_label.setStyleSheet("""
-            background-color: transparent;
-            border: none;
-            color: white;
-            font-size: 48px; /* 少し小さくして見やすく */
-            font-weight: bold;
-            padding: 10px; /* ウィンドウの角からの余白 */
-            text-shadow:
-                2px 0px 3px #000, -2px 0px 3px #000,
-                0px 2px 3px #000, 0px -2px 3px #000,
-                1px 1px 3px #000, -1px -1px 3px #000,
-                1px -1px 3px #000, -1px 1px 3px #000;
-        """)
-        self.duration_overlay_label.hide() # 最初は非表示
-
-        # 2. ラベルを1.5秒後に非表示にするためのタイマー
-        self.duration_overlay_timer = QtCore.QTimer(self)
-        self.duration_overlay_timer.setSingleShot(True)
-        self.duration_overlay_timer.setInterval(1500) # 1.5秒
-        self.duration_overlay_timer.timeout.connect(self.duration_overlay_label.hide)
+        self.overlay = OverlayLabel(self, self.video_frame)
+        self.duration_overlay_label = self.overlay.label
+        self.duration_overlay_timer = self.overlay.timer
 
         self.SEEK_SLIDER_STYLE_NORMAL = """
             QSlider::groove:horizontal {
@@ -547,16 +380,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         directory = os.path.dirname(file_path)
         log_message(f"Scanning directory: {directory}")
 
-        # サポートする動画ファイルの拡張子
-        supported_extensions = set(SUPPORTED_VIDEO_EXTENSIONS)
-
-        # ディレクトリをスキャンし、動画ファイルだけをフィルタリング
         try:
-            all_files = os.listdir(directory)
-            video_files = [
-                os.path.join(directory, f) for f in all_files
-                if os.path.splitext(f)[1].lower() in supported_extensions
-            ]
+            video_files = collect_video_files(directory)
         except OSError as e:
             log_message(f"Error scanning directory: {e}")
             self.status.showMessage(f"ディレクトリのスキャンに失敗しました: {e}", 5000)
@@ -567,12 +392,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             # 動画が1つも見つからない場合でも、指定されたファイルだけは再生する
             video_files = [file_path]
 
-        # Windowsの論理順（または可能な限り近い順序）でソート
-        video_files.sort(key=windows_logical_key)
-
         self.directory_playlist = video_files
 
-        # ### 変更点 3/6: シャッフル状態をリセット ###
         if self.shuffle_enabled:
             # シャッフルが有効な状態で新しいディレクトリを開いたら、一度無効にする
             self.shuffle_enabled = False
@@ -947,7 +768,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def stop(self) -> None:
         self.player.stop()
-        self.duration_overlay_label.hide()
+        self.overlay.hide()
         # 停止時にシークバーの色を通常に戻す
         if self._is_seek_bar_warning:
             self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
@@ -1032,30 +853,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # ------------- グローバルショートカット -------------
     def _setup_shortcuts(self) -> None:
-        self._shortcut_rows = [
-            ("Ctrl+O", "動画ファイルを開く", "ファイル"),
-            ("Ctrl+C", "現在再生中のファイル名をコピー", "ファイル"),
-            ("F1", "ショートカット一覧を表示", "ヘルプ"),
-            ("Space", "再生 / 一時停止", "再生"),
-            ("Left", "10秒戻る", "シーク"),
-            ("Right", "10秒進む", "シーク"),
-            ("Num 1", "60秒戻る", "シーク"),
-            ("Num 4", "60秒進む", "シーク"),
-            ("Page Up", "前の動画へ", "再生"),
-            ("Page Down", "次の動画へ", "再生"),
-            ("Up", "音量を10%上げる", "音量"),
-            ("Down", "音量を10%下げる", "音量"),
-            ("M", "ミュート切替", "音量"),
-            ("R", "リピート切替", "再生"),
-            ("S", "シャッフル切替", "再生"),
-            ("X", "再生速度を0.1倍下げる", "再生速度"),
-            ("C", "再生速度を0.1倍上げる", "再生速度"),
-            ("I", "メタデータを表示", "情報"),
-            ("Num 0", "最大化", "ウィンドウ"),
-            ("Num 7", "_ng フォルダへ移動して次を再生", "ファイル整理"),
-            ("Num 8", "終了", "ウィンドウ"),
-            ("Num 9", "_ok フォルダへ移動して次を再生", "ファイル整理"),
-        ]
+        self._shortcut_rows = SHORTCUT_ROWS
 
         def mk(key, handler):
             sc = QtWidgets.QShortcut(QtGui.QKeySequence(key), self)
@@ -1158,13 +956,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _show_overlay(self, text: str, duration_ms: int = 1500) -> None:
         """オーバーレイラベルにテキストを表示し、一定時間後に非表示にする"""
-        self.duration_overlay_label.setText(text)
-        self._update_overlay_geometry()
-        self.duration_overlay_label.show()
-        self.duration_overlay_label.raise_()
-        self.duration_overlay_timer.stop()
-        self.duration_overlay_timer.setInterval(duration_ms)
-        self.duration_overlay_timer.start()
+        self.overlay.show(text, duration_ms)
 
     # ------------- ステータス更新 -------------
     def _update_status_time(self) -> None:
@@ -1254,16 +1046,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self._media_length if self._media_length > 0 else self.player.get_length()
         )
 
-        def f(ms: int) -> str:
-            if ms <= 0:
-                return "00:00"
-            s = ms // 1000
-            m, s = divmod(s, 60)
-            h, m = divmod(m, 60)
-            return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-
         if total > 0:
-            self.status.showMessage(f"{f(value)} / {f(total)}")
+            self.status.showMessage(
+                f"{self._format_ms(value)} / {self._format_ms(total)}"
+            )
 
     def _on_slider_clicked(self, value: int) -> None:
         try:
@@ -1405,31 +1191,25 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # --- ファイルパスの準備 (停止後に行っても問題ない) ---
         file_name = os.path.basename(current_file_path)
-        source_dir = os.path.dirname(current_file_path)
-
-        target_dir = os.path.join(source_dir, subfolder_name)
-        target_file_path = os.path.join(target_dir, file_name)
+        target_file_path = target_path_for_subfolder(current_file_path, subfolder_name)
 
         log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
 
         # --- 移動処理 ---
         try:
-            os.makedirs(target_dir, exist_ok=True)
-
-            if os.path.exists(target_file_path):
-                log_message(
-                    f"File '{file_name}' already exists in target directory. Skipping move."
-                )
-                self.status.showMessage(
-                    f"移動失敗: {file_name}は移動先に既に存在します", 5000
-                )
-                # ファイルが存在した場合、次の曲の再生は行わずに待機する
-                return
-
-            shutil.move(current_file_path, target_file_path)
+            target_file_path = move_file_to_subfolder(current_file_path, subfolder_name)
             self.status.showMessage(f"移動完了: {file_name} -> {subfolder_name}", 4000)
             log_message(f"Successfully moved file to '{target_file_path}'")
 
+        except TargetFileExistsError:
+            log_message(
+                f"File '{file_name}' already exists in target directory. Skipping move."
+            )
+            self.status.showMessage(
+                f"移動失敗: {file_name}は移動先に既に存在します", 5000
+            )
+            # ファイルが存在した場合、次の曲の再生は行わずに待機する
+            return
         except Exception as e:
             log_message(f"Error moving file: {e}")
             self.status.showMessage(f"ファイル移動中にエラーが発生しました: {e}", 5000)
@@ -1479,29 +1259,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         オーバーレイウィンドウの位置とサイズを、video_frameに正確に合わせる。
         VLCウィンドウのグローバル座標を計算して追従させる。
         """
-        if not self.video_frame.isVisible():
-            return
-        
-        # ### ★★★ 変更点 ★★★ ###
-        # video_frame の左上の座標を、スクリーン全体のグローバル座標系に変換する
-        global_pos = self.video_frame.mapToGlobal(QtCore.QPoint(0, 0))
-        
-        # video_frame のサイズを取得する
-        frame_size = self.video_frame.size()
-        
-        # オーバーレイウィンドウのジオメトリを設定する
-        self.duration_overlay_label.setGeometry(
-            global_pos.x(),
-            global_pos.y(),
-            frame_size.width(),
-            frame_size.height()
-        )
+        self.overlay.update_geometry()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         """ウィンドウのリサイズに合わせてオーバーレイラベルのサイズを調整する"""
         super().resizeEvent(event)
         # video_frameの現在の大きさにラベルをぴったり合わせる
-        self.duration_overlay_label.setGeometry(self.video_frame.rect())
+        self.overlay.resize_to_frame_rect()
     
     def moveEvent(self, event: QtGui.QMoveEvent) -> None:
         """メインウィンドウの移動に合わせてオーバーレイの位置を更新する"""
@@ -1510,11 +1274,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         if self.duration_overlay_label.isVisible():
             self._update_overlay_geometry()
 
-    # VideoPlayer クラスの末尾あたりに追加
-    # ### 変更点 4/4: メタデータを収集してダイアログを表示するメソッドを新規作成 ###
     def _show_metadata_dialog(self):
         """現在再生中の動画のメタデータを抽出し、ダイアログで表示する"""
-        print("Show Metadata Dialog triggered")
         # 再生中でなければ何もしない
         if not (0 <= self.current_index < len(self.directory_playlist)):
             self.status.showMessage("再生中のファイルがありません", 3000)
@@ -1573,7 +1334,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
             "Now Playing": vlc.Meta.NowPlaying,
         }
         
-        # ### 変更点: 値が空でも項目を表示するようにループ処理を変更 ###
         for name, field_enum in meta_fields.items():
             # media.get_meta() は値がなければ None を返す
             value = media.get_meta(field_enum)

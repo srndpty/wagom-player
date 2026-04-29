@@ -6,7 +6,6 @@ class SeekSlider(QtWidgets.QSlider):
 
     clickedValue = QtCore.pyqtSignal(int)
 
-    # ### 変更点: paintEventメソッドを追加 ###
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         """スライダーの背景に1分ごとの目盛り線を描画する"""
         # 最初に、スライダーのデフォルト描画（溝、ハンドルなど）を実行する

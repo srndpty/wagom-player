@@ -13,9 +13,7 @@ def test_breadcrumbs_are_limited_to_maximum():
     assert diagnostics._breadcrumbs[0]["fields"]["index"] == 5
 
 
-def test_report_contains_session_state_breadcrumbs_and_stack_heading(
-    tmp_path, monkeypatch
-):
+def test_report_contains_session_state_breadcrumbs_and_stack_heading(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     diagnostics._breadcrumbs.clear()
     diagnostics.update_state_snapshot(current_file=r"C:\videos\movie.mp4")

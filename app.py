@@ -1,23 +1,23 @@
+import json
 import os
 import sys
-import re
-import json
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
-from PyQt5 import QtWidgets, QtCore, QtNetwork
+from PyQt5 import QtCore, QtNetwork, QtWidgets
 
 from wagom_player import diagnostics
 from wagom_player.logger import log_message
+from wagom_player.main_window import VideoPlayer
 from wagom_player.theme import (
-    apply_dark_theme,
     apply_app_icon,
+    apply_dark_theme,
     apply_windows_app_user_model_id,
 )
-from wagom_player.main_window import VideoPlayer
 
 # ログメッセージ関数を一時的にオーバーライドしてPIDとタイムスタンプを追加
 original_log_message = log_message
+
 
 def log_message(msg):
     pid = os.getpid()
@@ -28,7 +28,7 @@ def log_message(msg):
 SINGLE_INSTANCE_SERVER_NAME = "wagom-player-single-instance-v1"
 
 
-def _find_initial_file(argv: List[str]) -> Optional[str]:
+def _find_initial_file(argv: list[str]) -> Optional[str]:
     """コマンドライン引数から、最初に存在するファイルパスを取得する。"""
     for arg in argv[1:]:
         if os.path.exists(arg) and os.path.isfile(arg):
@@ -116,13 +116,15 @@ class SingleInstanceServer(QtCore.QObject):
         if isinstance(file_path, str):
             self.file_requested.emit(file_path)
 
-def main_wrapper(argv: List[str]) -> int:
+
+def main_wrapper(argv: list[str]) -> int:
     diagnostics.start_session(argv)
     diagnostics.install_excepthook()
     try:
         return main(argv)
     except Exception as e:
         import traceback
+
         app = QtWidgets.QApplication.instance()
         if app is None:
             app = QtWidgets.QApplication(sys.argv)
@@ -147,7 +149,8 @@ def main_wrapper(argv: List[str]) -> int:
         msg_box.exec_()
         return 1
 
-def main(argv: List[str]) -> int:
+
+def main(argv: list[str]) -> int:
     _configure_runtime_environment()
 
     # --- 基本的なアプリケーション設定 ---
@@ -178,6 +181,7 @@ def main(argv: List[str]) -> int:
     player_window.show()
 
     return app.exec_()
+
 
 if __name__ == "__main__":
     sys.exit(main_wrapper(sys.argv))

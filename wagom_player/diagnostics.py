@@ -8,8 +8,9 @@ import threading
 import time
 import traceback
 from collections import deque
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Optional
 
 from .logger import configure_session_log, log_message, logs_dir
 
@@ -26,7 +27,7 @@ HANG_CHECK_INTERVAL_SECONDS = 1.0
 
 _lock = threading.RLock()
 _breadcrumbs = deque(maxlen=MAX_BREADCRUMBS)
-_state_snapshot: Dict[str, Any] = {}
+_state_snapshot: dict[str, Any] = {}
 _session_id = datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"
 _started_at = datetime.now()
 _argv: Iterable[str] = ()
@@ -131,9 +132,7 @@ def write_exception_report(
     exc_value: BaseException,
     exc_tb: Any,
 ) -> str:
-    formatted = "".join(
-        traceback.format_exception(exc_type, exc_value, exc_tb)
-    )
+    formatted = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     return _write_report("exception", "Unhandled Exception Report", formatted)
 
 
@@ -271,23 +270,19 @@ def _dump_tracebacks() -> str:
         return stream.getvalue().rstrip()
 
 
-def _format_mapping(mapping: Dict[str, Any]) -> str:
+def _format_mapping(mapping: dict[str, Any]) -> str:
     if not mapping:
         return "(empty)"
     return "\n".join(
-        f"{key}: {_format_report_value(value)}"
-        for key, value in sorted(mapping.items())
+        f"{key}: {_format_report_value(value)}" for key, value in sorted(mapping.items())
     )
 
 
-def _format_breadcrumbs(items: Iterable[Dict[str, Any]]) -> str:
+def _format_breadcrumbs(items: Iterable[dict[str, Any]]) -> str:
     lines = []
     for item in items:
         fields = item.get("fields", {})
-        lines.append(
-            f"{item.get('time')} {item.get('event')} "
-            f"{_format_mapping(fields)}"
-        )
+        lines.append(f"{item.get('time')} {item.get('event')} {_format_mapping(fields)}")
     return "\n".join(lines) if lines else "(empty)"
 
 

@@ -12,9 +12,7 @@ from wagom_player.file_actions import (
 def test_target_path_for_subfolder_keeps_filename(tmp_path: Path):
     source = tmp_path / "movie.mp4"
 
-    assert target_path_for_subfolder(str(source), "_ok") == str(
-        tmp_path / "_ok" / "movie.mp4"
-    )
+    assert target_path_for_subfolder(str(source), "_ok") == str(tmp_path / "_ok" / "movie.mp4")
 
 
 def test_move_file_to_subfolder_moves_file(tmp_path: Path):

@@ -18,7 +18,7 @@ class SeekSlider(QtWidgets.QSlider):
 
         # --- 描画準備 ---
         painter = QtGui.QPainter(self)
-        
+
         # 目盛り線の色とスタイルを設定 (白の半透明)
         pen_color = QtGui.QColor(255, 255, 255, 100)  # RGBA (A=100で半透明)
         pen = QtGui.QPen(pen_color)
@@ -26,29 +26,32 @@ class SeekSlider(QtWidgets.QSlider):
         painter.setPen(pen)
 
         # --- 目盛り線の位置を計算して描画 ---
-        
+
         # QStyleOptionSliderを使って、スライダーの描画に必要な情報を取得する
         # これにより、異なるOSやテーマでも正確な位置に描画できる
         opt = QtWidgets.QStyleOptionSlider()
         self.initStyleOption(opt)
-        
+
         # スライダーの「溝」部分の矩形領域を取得する
         groove_rect = self.style().subControlRect(
             QtWidgets.QStyle.CC_Slider, opt, QtWidgets.QStyle.SC_SliderGroove, self
         )
-        
+
         tick_interval_ms = 60 * 1000  # 1分 = 60000ミリ秒
-        
+
         # 1分から、動画の長さを超えない範囲でループ
         current_ms = tick_interval_ms
         while current_ms < duration:
             # 現在の時間（ミリ秒）が、スライダーの溝の中でどのX座標に対応するかを計算
-            x = self.style().sliderPositionFromValue(
-                self.minimum(),
-                self.maximum(),
-                current_ms,
-                groove_rect.width(),
-            ) + groove_rect.x()
+            x = (
+                self.style().sliderPositionFromValue(
+                    self.minimum(),
+                    self.maximum(),
+                    current_ms,
+                    groove_rect.width(),
+                )
+                + groove_rect.x()
+            )
 
             # 計算したX座標に縦線を描画
             painter.drawLine(x, groove_rect.top(), x, groove_rect.bottom())

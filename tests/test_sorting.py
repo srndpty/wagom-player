@@ -27,9 +27,7 @@ class WindowsLogicalKeyTest(unittest.TestCase):
             ".3g2",
         }
 
-        self.assertTrue(
-            observed_video_extensions.issubset(main_window.SUPPORTED_VIDEO_EXTENSIONS)
-        )
+        self.assertTrue(observed_video_extensions.issubset(main_window.SUPPORTED_VIDEO_EXTENSIONS))
 
     def test_fallback_key_prefers_case_insensitive_natural_order(self):
         key = main_window._create_windows_logical_key(None)

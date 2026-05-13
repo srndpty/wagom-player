@@ -1,5 +1,3 @@
-from typing import List
-
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 
@@ -35,15 +33,13 @@ class MetadataDialog(QtWidgets.QDialog):
         clipboard = QtWidgets.QApplication.clipboard()
         clipboard.setText(self.text_edit.toPlainText())
         self.copy_button.setText("コピーしました！")
-        QtCore.QTimer.singleShot(
-            1500, lambda: self.copy_button.setText("クリップボードにコピー")
-        )
+        QtCore.QTimer.singleShot(1500, lambda: self.copy_button.setText("クリップボードにコピー"))
 
 
 class ShortcutListDialog(QtWidgets.QDialog):
     """ショートカット一覧を表示するダイアログ"""
 
-    def __init__(self, shortcut_rows: List[tuple], parent=None):
+    def __init__(self, shortcut_rows: list[tuple], parent=None):
         super().__init__(parent)
         self.setWindowTitle("ショートカット一覧")
         self.setMinimumSize(520, 480)

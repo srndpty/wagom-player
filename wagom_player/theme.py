@@ -1,5 +1,6 @@
 import os
 import sys
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 try:
@@ -39,12 +40,22 @@ def apply_dark_theme(app: QtWidgets.QApplication) -> None:
         QSlider::groove:horizontal { background: #3a3a3a; height: 6px; border-radius: 3px; }
         QSlider::sub-page:horizontal { background: #0078d7; height: 6px; border-radius: 3px; }
         QSlider::add-page:horizontal { background: #2a2a2a; height: 6px; border-radius: 3px; }
-        QSlider::handle:horizontal { background: #1e90ff; width: 14px; margin: -6px 0; border-radius: 7px; }
+        QSlider::handle:horizontal {
+            background: #1e90ff;
+            width: 14px;
+            margin: -6px 0;
+            border-radius: 7px;
+        }
         QMenuBar { background: #2d2d2d; color: #e6e6e6; }
         QMenuBar::item:selected { background: #3a3a3a; }
         QMenu { background: #2d2d2d; color: #e6e6e6; }
         QMenu::item:selected { background: #3a3a3a; }
-        QPushButton { background: #2d2d2d; color: #e6e6e6; border: 1px solid #3f3f3f; padding: 4px 10px; }
+        QPushButton {
+            background: #2d2d2d;
+            color: #e6e6e6;
+            border: 1px solid #3f3f3f;
+            padding: 4px 10px;
+        }
         QPushButton:hover { background: #353535; }
         QPushButton:pressed { background: #2a2a2a; }
         QLabel { color: #e6e6e6; }

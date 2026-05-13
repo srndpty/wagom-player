@@ -7,9 +7,7 @@ class OverlayLabel:
         self.video_frame = video_frame
         self.label = QtWidgets.QLabel(window)
         self.label.setWindowFlags(
-            QtCore.Qt.FramelessWindowHint
-            | QtCore.Qt.Tool
-            | QtCore.Qt.WindowStaysOnTopHint
+            QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint
         )
         self.label.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)

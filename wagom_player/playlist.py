@@ -3,8 +3,6 @@ import functools
 import os
 import re
 import sys
-from typing import List
-
 
 SUPPORTED_VIDEO_EXTENSIONS = (
     ".mp4",
@@ -81,7 +79,7 @@ def is_supported_video_file(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in SUPPORTED_VIDEO_EXTENSIONS
 
 
-def collect_video_files(directory: str) -> List[str]:
+def collect_video_files(directory: str) -> list[str]:
     video_files = [
         os.path.join(directory, name)
         for name in os.listdir(directory)

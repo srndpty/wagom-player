@@ -25,13 +25,17 @@ from .theme import resource_path
 
 try:
     import vlc
-except ImportError as e:
-    raise SystemExit(
-        "python-vlc が見つかりません。`pip install python-vlc` を実行してください"
-    ) from e
+except (FileNotFoundError, ImportError, OSError):
+    vlc = None  # type: ignore[assignment]
 
 
 def _create_vlc_instance() -> "vlc.Instance":
+    if vlc is None:
+        raise RuntimeError(
+            "VLC が見つかりません。VLC 本体をインストールするか、"
+            "PYTHON_VLC_LIB_PATH に libvlc.dll のディレクトリを設定してください。"
+        )
+
     lib_path = os.environ.get("PYTHON_VLC_LIB_PATH")
     if lib_path and os.path.isdir(lib_path):
         return vlc.Instance([f"--plugin-path={lib_path}", "--audio-time-stretch"])

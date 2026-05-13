@@ -1,3 +1,7 @@
+param(
+    [string] $DiffRange = ""
+)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
@@ -38,7 +42,11 @@ Invoke-Step "pytest with coverage" {
 }
 
 Invoke-Step "git diff whitespace check" {
-    git diff --check
+    if ($DiffRange) {
+        git diff --check $DiffRange
+    } else {
+        git diff --check
+    }
 }
 
 Write-Host ""

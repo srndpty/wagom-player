@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from wagom_player import main_window
+from wagom_player import playlist
 
 
 class WindowsLogicalKeyTest(unittest.TestCase):
@@ -27,10 +27,10 @@ class WindowsLogicalKeyTest(unittest.TestCase):
             ".3g2",
         }
 
-        self.assertTrue(observed_video_extensions.issubset(main_window.SUPPORTED_VIDEO_EXTENSIONS))
+        self.assertTrue(observed_video_extensions.issubset(playlist.SUPPORTED_VIDEO_EXTENSIONS))
 
     def test_fallback_key_prefers_case_insensitive_natural_order(self):
-        key = main_window._create_windows_logical_key(None)
+        key = playlist._create_windows_logical_key(None)
 
         files = [
             "/tmp/File10.mp4",
@@ -51,7 +51,7 @@ class WindowsLogicalKeyTest(unittest.TestCase):
             calls.append((a, b))
             return -1 if a < b else (1 if a > b else 0)
 
-        key = main_window._create_windows_logical_key(fake_comparer)
+        key = playlist._create_windows_logical_key(fake_comparer)
         files = ["/tmp/b.mp4", "/tmp/A.mp4"]
 
         sorted(files, key=key)

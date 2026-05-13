@@ -164,9 +164,10 @@ def main(argv: List[str]) -> int:
     icon = apply_app_icon(app)
 
     # VideoPlayerウィンドウを作成し、単一のファイルパスを渡す
+    diagnostics.heartbeat()
+    diagnostics.start_hang_monitor()
     player_window = VideoPlayer(file=initial_file)
     player_window.setWindowIcon(icon)
-    diagnostics.start_hang_monitor()
     if single_instance_server is not None:
         instance_ipc = SingleInstanceServer(single_instance_server)
         instance_ipc.file_requested.connect(player_window.open_external_file)

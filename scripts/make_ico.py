@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from PyQt5 import QtCore, QtGui, QtSvg
 
 

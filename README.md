@@ -65,6 +65,14 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## 開発時の品質チェック
+
+ruff の format / lint、pytest-cov、`git diff --check` をまとめて実行できます。
+
+```powershell
+.\scripts\check.ps1
+```
+
 ## 使い方
 
 ### ビルド方法・実行可能ファイルの場合

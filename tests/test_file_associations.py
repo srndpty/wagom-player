@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REG_FILE = Path(__file__).resolve().parents[1] / "windows" / "file-associations.reg"
 
 

@@ -1,36 +1,41 @@
 import os
 import sys
-from typing import List, Optional
+from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from . import diagnostics
 from .dialogs import MetadataDialog, ShortcutListDialog
 from .file_actions import (
     TargetFileExistsError,
     move_file_to_subfolder,
     target_path_for_subfolder,
 )
+from .logger import log_message
 from .overlay import OverlayLabel
 from .playlist import (
     SUPPORTED_VIDEO_EXTENSIONS,
-    _create_windows_logical_key,
     collect_video_files,
-    natural_key,
 )
+from .playlist import _create_windows_logical_key as _create_windows_logical_key
+from .playlist import natural_key as natural_key
 from .seek_slider import SeekSlider
 from .shortcuts import SHORTCUT_ROWS
 from .theme import resource_path
-from .logger import log_message
-from . import diagnostics
 
 try:
     import vlc
-except ImportError as e:
-    raise SystemExit(
-        "python-vlc が見つかりません。`pip install python-vlc` を実行してください"
-    ) from e
+except (FileNotFoundError, ImportError, OSError):
+    vlc = None  # type: ignore[assignment]
+
 
 def _create_vlc_instance() -> "vlc.Instance":
+    if vlc is None:
+        raise RuntimeError(
+            "VLC が見つかりません。VLC 本体をインストールするか、"
+            "PYTHON_VLC_LIB_PATH に libvlc.dll のディレクトリを設定してください。"
+        )
+
     lib_path = os.environ.get("PYTHON_VLC_LIB_PATH")
     if lib_path and os.path.isdir(lib_path):
         return vlc.Instance([f"--plugin-path={lib_path}", "--audio-time-stretch"])
@@ -64,7 +69,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         self.repeat_enabled: bool = False
         self.shuffle_enabled: bool = False
-        self.shuffled_playlist: List[str] = []
+        self.shuffled_playlist: list[str] = []
 
         # UI
         self._build_ui()
@@ -123,7 +128,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
 
         # プレイリスト
-        self.directory_playlist: List[str] = [] # ディレクトリ内の動画リスト
+        self.directory_playlist: list[str] = []  # ディレクトリ内の動画リスト
         self.current_index: int = -1
         self._last_external_file_path: str = ""
         self._last_external_file_msec: int = 0
@@ -168,7 +173,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
             diagnostics.record_breadcrumb("initial_file", path=file)
             self._load_file_and_directory(file)
             self._remember_external_file(file)
-            
 
     # ---------------- UI ----------------
     def _build_ui(self) -> None:
@@ -304,18 +308,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
             btn.setFixedSize(36, 28)
             btn.setIconSize(QtCore.QSize(18, 18))
 
-        style_btn(
-            self.btn_open, resource_path("resources", "icons", "open.svg"), "開く"
-        )
-        style_btn(
-            self.btn_stop, resource_path("resources", "icons", "stop.svg"), "停止"
-        )
-        style_btn(
-            self.btn_prev, resource_path("resources", "icons", "prev.svg"), "前へ"
-        )
-        style_btn(
-            self.btn_next, resource_path("resources", "icons", "next.svg"), "次へ"
-        )
+        style_btn(self.btn_open, resource_path("resources", "icons", "open.svg"), "開く")
+        style_btn(self.btn_stop, resource_path("resources", "icons", "stop.svg"), "停止")
+        style_btn(self.btn_prev, resource_path("resources", "icons", "prev.svg"), "前へ")
+        style_btn(self.btn_next, resource_path("resources", "icons", "next.svg"), "次へ")
 
         self._icon_play = QtGui.QIcon(resource_path("resources", "icons", "play.svg"))
         self._icon_pause = QtGui.QIcon(resource_path("resources", "icons", "pause.svg"))
@@ -324,9 +320,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._last_playing_state: Optional[bool] = None
         self._update_play_button()
         # 音量アイコン
-        self._icon_volume = QtGui.QIcon(
-            resource_path("resources", "icons", "volume.svg")
-        )
+        self._icon_volume = QtGui.QIcon(resource_path("resources", "icons", "volume.svg"))
         self._icon_mute = QtGui.QIcon(resource_path("resources", "icons", "mute.svg"))
         if hasattr(self, "volume_icon"):
             self.volume_icon.setPixmap((self._icon_volume).pixmap(18, 18))
@@ -509,7 +503,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
         em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end)
         self.vlc_events.media_ended.connect(self._on_media_end)
 
-
     def _on_vlc_end(self, event) -> None:
         log_message(f"_on_vlc_end(): VLC EndReached fired, current_index={self.current_index}")
         self.vlc_events.media_ended.emit()
@@ -558,8 +551,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                         state_before = None
                         t_before = None
                     log_message(
-                        f"_restart_current(): BEFORE reload "
-                        f"state={state_before}, time={t_before}"
+                        f"_restart_current(): BEFORE reload state={state_before}, time={t_before}"
                     )
 
                     # ★ 同じパスでメディアを作り直す（stop は呼ばない）
@@ -583,8 +575,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                         state_after = None
                         t_after = None
                     log_message(
-                        f"_restart_current(): AFTER reload "
-                        f"state={state_after}, time={t_after}"
+                        f"_restart_current(): AFTER reload state={state_after}, time={t_after}"
                     )
 
                 except Exception as e:
@@ -592,7 +583,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             QtCore.QTimer.singleShot(80, _restart_current)
             return
-
 
         # ============================
         # ★ 通常モード（repeat_enabled=False）：次のファイルへ
@@ -619,18 +609,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 next_path = playlist[next_playlist_idx]
                 next_original_idx = self.directory_playlist.index(next_path)
                 log_message(
-                    f"_on_media_end(): moving to next track idx={next_original_idx}, path={next_path}"
+                    "_on_media_end(): moving to next track "
+                    f"idx={next_original_idx}, path={next_path}"
                 )
-                QtCore.QTimer.singleShot(
-                    80, lambda idx=next_original_idx: self._end_after(idx)
-                )
+                QtCore.QTimer.singleShot(80, lambda idx=next_original_idx: self._end_after(idx))
             else:
                 log_message("_on_media_end(): reached end of playlist (repeat off) -> stop()")
                 self.stop()
         finally:
             # 次の曲に進む処理が終わったら _ending を戻す
             self._ending = False
-
 
     def _end_after(self, idx: int) -> None:
         log_message(f"_end_after(): idx={idx}, current_index(before)={self.current_index}")
@@ -648,28 +636,25 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # ------------- プレイリスト -------------
 
-
     def play_at(self, index: int) -> None:
         diagnostics.record_breadcrumb("play_at_requested", index=index)
 
         if not (0 <= index < len(self.directory_playlist)):
             log_message("play_at(): index out of range")
             return
-        
+
         if getattr(self, "_is_changing_media", False):
             log_message(f"play_at(): SKIP index={index} because _is_changing_media is True")
             return
         self._is_changing_media = True
-        
+
         try:
             old = self.current_index
             log_message(f"play_at(): START index={index}, old_index={old}")
             self.current_index = index
             path = self.directory_playlist[index]
             log_message(f"play_at(): path={path}")
-            diagnostics.record_breadcrumb(
-                "play_at_start", index=index, old_index=old, path=path
-            )
+            diagnostics.record_breadcrumb("play_at_start", index=index, old_index=old, path=path)
 
             try:
                 log_message("play_at(): before player.stop()")
@@ -709,7 +694,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
             diagnostics.record_breadcrumb("play_at_before_player_play", path=path)
             self.player.play()
             diagnostics.record_breadcrumb("play_at_after_player_play", path=path)
-            log_message(f"play_at(): player.play() done, current_index={self.current_index}, path={path}")
+            log_message(
+                f"play_at(): player.play() done, current_index={self.current_index}, path={path}"
+            )
             self._update_window_title(os.path.basename(path))
             self.status.showMessage(f"再生中: {path}")
 
@@ -717,7 +704,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             if self._is_seek_bar_warning:
                 self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
                 self._is_seek_bar_warning = False
-            
+
             self._media_length = -1
             self.seek_slider.blockSignals(True)
             self.seek_slider.setEnabled(True)
@@ -727,15 +714,17 @@ class VideoPlayer(QtWidgets.QMainWindow):
             log_message("play_at(): end")
         finally:
             self._is_changing_media = False
-    
-    def _get_current_playlist(self) -> List[str]:
+
+    def _get_current_playlist(self) -> list[str]:
         """現在の再生モードに応じたプレイリストを返すヘルパーメソッド"""
         return self.shuffled_playlist if self.shuffle_enabled else self.directory_playlist
 
     def play_next(self) -> None:
         diagnostics.record_breadcrumb("play_next_requested")
         playlist = self._get_current_playlist()
-        log_message(f"play_next(): current_index={self.current_index}, playlist_len={len(playlist)}")
+        log_message(
+            f"play_next(): current_index={self.current_index}, playlist_len={len(playlist)}"
+        )
         if not playlist:
             return
         # 現在再生中のファイルがシャッフルリストの何番目にあるかを探す
@@ -747,7 +736,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 next_path = playlist[shuffled_idx + 1]
                 # 元のリストでのインデックスを見つけて再生
                 next_original_idx = self.directory_playlist.index(next_path)
-                QtCore.QTimer.singleShot(50, lambda: self._play_at_with_reason(next_original_idx, "from_next"))
+                QtCore.QTimer.singleShot(
+                    50, lambda: self._play_at_with_reason(next_original_idx, "from_next")
+                )
         except ValueError:
             pass
         log_message(f"play_next(): scheduling play_at({next_original_idx}) in 50ms")
@@ -788,7 +779,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.player.pause()
         else:
             self.player.play()
-        
+
         self._update_play_button()
 
     def stop(self) -> None:
@@ -799,7 +790,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         if self._is_seek_bar_warning:
             self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_NORMAL)
             self._is_seek_bar_warning = False
-        
+
         self.seek_slider.blockSignals(True)
         self.seek_slider.setEnabled(False)
         self.seek_slider.setRange(0, 0)
@@ -888,12 +879,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             sc.activated.connect(handler)
             return sc
 
-        self._sc_left = mk(
-            QtCore.Qt.Key_Left, lambda: self.seek_by(-self.SEEK_SHORT_MS)
-        )
-        self._sc_right = mk(
-            QtCore.Qt.Key_Right, lambda: self.seek_by(self.SEEK_SHORT_MS)
-        )
+        self._sc_left = mk(QtCore.Qt.Key_Left, lambda: self.seek_by(-self.SEEK_SHORT_MS))
+        self._sc_right = mk(QtCore.Qt.Key_Right, lambda: self.seek_by(self.SEEK_SHORT_MS))
         self._sc_up = mk(QtCore.Qt.Key_Up, lambda: self._adjust_volume(+10))
         self._sc_down = mk(QtCore.Qt.Key_Down, lambda: self._adjust_volume(-10))
         self._sc_mute = mk(QtCore.Qt.Key_M, self._toggle_mute)
@@ -921,18 +908,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
             QtGui.QKeySequence(int(QtCore.Qt.Key_9 | QtCore.Qt.KeypadModifier)), self
         )
         self._sc_move_ok.setContext(QtCore.Qt.ApplicationShortcut)
-        self._sc_move_ok.activated.connect(
-            lambda: self._move_current_file_and_play_next("_ok")
-        )
+        self._sc_move_ok.activated.connect(lambda: self._move_current_file_and_play_next("_ok"))
 
         # Num 6: "_ng" フォルダに移動
         self._sc_move_ng = QtWidgets.QShortcut(
             QtGui.QKeySequence(int(QtCore.Qt.Key_7 | QtCore.Qt.KeypadModifier)), self
         )
         self._sc_move_ng.setContext(QtCore.Qt.ApplicationShortcut)
-        self._sc_move_ng.activated.connect(
-            lambda: self._move_current_file_and_play_next("_ng")
-        )
+        self._sc_move_ng.activated.connect(lambda: self._move_current_file_and_play_next("_ng"))
 
         # Iキーでメタデータ情報表示
         self._sc_metadata = mk(QtCore.Qt.Key_I, self._show_metadata_dialog)
@@ -1004,13 +987,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 self._update_window_title()
                 formatted_time = self._format_ms(total)
                 self._show_overlay(formatted_time)
-            
+
             if not self._seeking_user:
                 self.seek_slider.blockSignals(True)
                 self.seek_slider.setValue(cur)
                 self.seek_slider.blockSignals(False)
 
-            is_near_end = (cur > total - 12_000) # 10秒だと判定が微妙なので12秒に余裕を持たせる
+            is_near_end = cur > total - 12_000  # 10秒だと判定が微妙なので12秒に余裕を持たせる
             if is_near_end and not self._is_seek_bar_warning:
                 # 黄色に変更
                 self.seek_slider.setStyleSheet(self.SEEK_SLIDER_STYLE_WARNING)
@@ -1071,16 +1054,20 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _update_window_title(self, filename: Optional[str] = None) -> None:
         playlist = self._get_current_playlist()
-        current_path = self.directory_playlist[self.current_index] if 0 <= self.current_index < len(self.directory_playlist) else ""
-        
+        current_path = (
+            self.directory_playlist[self.current_index]
+            if 0 <= self.current_index < len(self.directory_playlist)
+            else ""
+        )
+
         name = filename or (os.path.basename(current_path) if current_path else "")
-        
+
         # シャッフルリスト内でのインデックスを探す
         try:
             idx = playlist.index(current_path) + 1 if current_path else 0
         except ValueError:
             idx = 0
-            
+
         total = len(playlist)
         prefix = f"[{idx}/{total}] " if total else ""
         shuffle_indicator = "[S] " if self.shuffle_enabled else ""
@@ -1120,14 +1107,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _on_slider_moved(self, value: int) -> None:
         diagnostics.record_breadcrumb("slider_moved", value=value)
-        total = (
-            self._media_length if self._media_length > 0 else self.player.get_length()
-        )
+        total = self._media_length if self._media_length > 0 else self.player.get_length()
 
         if total > 0:
-            self.status.showMessage(
-                f"{self._format_ms(value)} / {self._format_ms(total)}"
-            )
+            self.status.showMessage(f"{self._format_ms(value)} / {self._format_ms(total)}")
 
     def _on_slider_clicked(self, value: int) -> None:
         diagnostics.record_breadcrumb("slider_clicked", value=value)
@@ -1200,6 +1183,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _create_or_clear_shuffled_playlist(self):
         """シャッフルリストを作成またはクリアする"""
         import random
+
         if self.shuffle_enabled and self.directory_playlist:
             log_message("Shuffle mode enabled. Creating shuffled playlist.")
             current_path = self.directory_playlist[self.current_index]
@@ -1210,7 +1194,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         else:
             log_message("Shuffle mode disabled.")
             self.shuffled_playlist = []
-            
+
     # _toggle_shuffleから_update_shuffle_buttonに名前を変更したものを流用
     def _update_shuffle_button(self):
         self.btn_shuffle.setIcon(
@@ -1297,12 +1281,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             )
 
         except TargetFileExistsError:
-            log_message(
-                f"File '{file_name}' already exists in target directory. Skipping move."
-            )
-            self.status.showMessage(
-                f"移動失敗: {file_name}は移動先に既に存在します", 5000
-            )
+            log_message(f"File '{file_name}' already exists in target directory. Skipping move.")
+            self.status.showMessage(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
             diagnostics.record_breadcrumb(
                 "move_current_file_target_exists", target=target_file_path
             )
@@ -1349,10 +1329,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.stop()
         else:
             log_message(f"Playing next item at index {next_index}.")
-            QtCore.QTimer.singleShot(
-                50, lambda idx=next_index: self.play_at(idx)
-            )
-                
+            QtCore.QTimer.singleShot(50, lambda idx=next_index: self.play_at(idx))
+
     def _update_overlay_geometry(self):
         """
         オーバーレイウィンドウの位置とサイズを、video_frameに正確に合わせる。
@@ -1365,7 +1343,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         super().resizeEvent(event)
         # video_frameの現在の大きさにラベルをぴったり合わせる
         self.overlay.resize_to_frame_rect()
-    
+
     def moveEvent(self, event: QtGui.QMoveEvent) -> None:
         """メインウィンドウの移動に合わせてオーバーレイの位置を更新する"""
         super().moveEvent(event)
@@ -1387,15 +1365,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # --- メタデータの収集 ---
         metadata_lines = []
-        
+
         # 1. 基本情報
         file_path = self.directory_playlist[self.current_index]
         metadata_lines.append(f"ファイルパス: {file_path}")
-        
+
         duration_ms = media.get_duration()
         if duration_ms > 0:
             metadata_lines.append(f"長さ: {self._format_ms(duration_ms)} ({duration_ms} ms)")
-        
+
         metadata_lines.append("-" * 20)
 
         # 2. VLCから取得できるメタデータ
@@ -1433,20 +1411,20 @@ class VideoPlayer(QtWidgets.QMainWindow):
             "Artwork URL": vlc.Meta.ArtworkURL,
             "Now Playing": vlc.Meta.NowPlaying,
         }
-        
+
         for name, field_enum in meta_fields.items():
             # media.get_meta() は値がなければ None を返す
             value = media.get_meta(field_enum)
-            
+
             # valueがNoneなら空文字列に変換し、そうでなければそのままの値を使う
             # これにより、値がなくても "項目名: " という行が必ず追加される
             display_value = value or ""
-            
+
             metadata_lines.append(f"{name}: {display_value}")
 
         # --- ダイアログの表示 ---
         final_text = "\n".join(metadata_lines)
-        
+
         # 作成したMetadataDialogクラスのインスタンスを生成して表示
         dialog = MetadataDialog(final_text, self)
-        dialog.exec_() # モーダルダイアログとして表示
+        dialog.exec_()  # モーダルダイアログとして表示

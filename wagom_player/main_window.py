@@ -19,6 +19,15 @@ from .playlist import (
 )
 from .playlist import _create_windows_logical_key as _create_windows_logical_key
 from .playlist import natural_key as natural_key
+from .playlist_state import (
+    active_playlist,
+    adjacent_index,
+    create_shuffled_playlist,
+    next_index_after_removal,
+)
+from .playlist_state import (
+    next_path as next_path_after_current,
+)
 from .seek_slider import SeekSlider
 from .shortcuts import SHORTCUT_ROWS
 from .theme import resource_path
@@ -594,23 +603,17 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._ending = True
 
         try:
-            current_path = self.directory_playlist[self.current_index]
-            try:
-                current_playlist_idx = playlist.index(current_path)
-            except ValueError:
-                log_message("_on_media_end(): current_path not in playlist")
-                return
-
-            next_playlist_idx = -1
-            if current_playlist_idx + 1 < len(playlist):
-                next_playlist_idx = current_playlist_idx + 1
-
-            if next_playlist_idx != -1:
-                next_path = playlist[next_playlist_idx]
-                next_original_idx = self.directory_playlist.index(next_path)
+            next_original_idx = adjacent_index(
+                self.directory_playlist,
+                playlist,
+                self.current_index,
+                1,
+            )
+            if next_original_idx is not None:
+                next_track_path = self.directory_playlist[next_original_idx]
                 log_message(
                     "_on_media_end(): moving to next track "
-                    f"idx={next_original_idx}, path={next_path}"
+                    f"idx={next_original_idx}, path={next_track_path}"
                 )
                 QtCore.QTimer.singleShot(80, lambda idx=next_original_idx: self._end_after(idx))
             else:
@@ -717,7 +720,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _get_current_playlist(self) -> list[str]:
         """現在の再生モードに応じたプレイリストを返すヘルパーメソッド"""
-        return self.shuffled_playlist if self.shuffle_enabled else self.directory_playlist
+        return active_playlist(
+            self.directory_playlist,
+            self.shuffled_playlist,
+            self.shuffle_enabled,
+        )
 
     def play_next(self) -> None:
         diagnostics.record_breadcrumb("play_next_requested")
@@ -725,22 +732,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
         log_message(
             f"play_next(): current_index={self.current_index}, playlist_len={len(playlist)}"
         )
-        if not playlist:
+        next_original_idx = adjacent_index(
+            self.directory_playlist,
+            playlist,
+            self.current_index,
+            1,
+        )
+        if next_original_idx is None:
             return
-        # 現在再生中のファイルがシャッフルリストの何番目にあるかを探す
         current_path = self.directory_playlist[self.current_index]
         log_message(f"play_next(): current_path={current_path}")
-        try:
-            shuffled_idx = playlist.index(current_path)
-            if (shuffled_idx + 1) < len(playlist):
-                next_path = playlist[shuffled_idx + 1]
-                # 元のリストでのインデックスを見つけて再生
-                next_original_idx = self.directory_playlist.index(next_path)
-                QtCore.QTimer.singleShot(
-                    50, lambda: self._play_at_with_reason(next_original_idx, "from_next")
-                )
-        except ValueError:
-            pass
+        QtCore.QTimer.singleShot(
+            50, lambda: self._play_at_with_reason(next_original_idx, "from_next")
+        )
         log_message(f"play_next(): scheduling play_at({next_original_idx}) in 50ms")
 
     def _play_at_with_reason(self, index: int, reason: str) -> None:
@@ -751,17 +755,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def play_previous(self) -> None:
         diagnostics.record_breadcrumb("play_previous_requested")
         playlist = self._get_current_playlist()
-        if not playlist:
+        prev_original_idx = adjacent_index(
+            self.directory_playlist,
+            playlist,
+            self.current_index,
+            -1,
+        )
+        if prev_original_idx is None:
             return
-        current_path = self.directory_playlist[self.current_index]
-        try:
-            shuffled_idx = playlist.index(current_path)
-            if (shuffled_idx - 1) >= 0:
-                prev_path = playlist[shuffled_idx - 1]
-                prev_original_idx = self.directory_playlist.index(prev_path)
-                QtCore.QTimer.singleShot(50, lambda: self.play_at(prev_original_idx))
-        except ValueError:
-            pass
+        QtCore.QTimer.singleShot(50, lambda: self.play_at(prev_original_idx))
 
     # ------------- 再生操作 -------------
     def toggle_play(self) -> None:
@@ -1186,11 +1188,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         if self.shuffle_enabled and self.directory_playlist:
             log_message("Shuffle mode enabled. Creating shuffled playlist.")
-            current_path = self.directory_playlist[self.current_index]
-            temp_list = self.directory_playlist[:]
-            temp_list.remove(current_path)
-            random.shuffle(temp_list)
-            self.shuffled_playlist = [current_path] + temp_list
+            self.shuffled_playlist = create_shuffled_playlist(
+                self.directory_playlist,
+                self.current_index,
+                random.shuffle,
+            )
         else:
             log_message("Shuffle mode disabled.")
             self.shuffled_playlist = []
@@ -1254,12 +1256,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         next_path = None
         if self.shuffle_enabled:
             playlist = self._get_current_playlist()
-            try:
-                cur_in_playlist = playlist.index(current_file_path)
-            except ValueError:
-                cur_in_playlist = -1
-            if cur_in_playlist != -1 and cur_in_playlist + 1 < len(playlist):
-                next_path = playlist[cur_in_playlist + 1]
+            next_path = next_path_after_current(playlist, current_file_path)
 
         # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
         log_message("Stopping playback to release file lock...")
@@ -1313,16 +1310,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
 
         # 次に再生する index を決定
-        next_index = None
-
-        if self.shuffle_enabled and next_path is not None:
-            # シャッフルリストで「次」だったパスを、ソート済みリスト上のインデックスに変換
-            if next_path in self.directory_playlist:
-                next_index = self.directory_playlist.index(next_path)
-        elif not self.shuffle_enabled:
-            # 通常モードでは、今の位置 index_to_remove に来たファイルをそのまま再生
-            if index_to_remove < len(self.directory_playlist):
-                next_index = index_to_remove
+        next_index = next_index_after_removal(
+            self.directory_playlist,
+            index_to_remove,
+            self.shuffle_enabled,
+            next_path,
+        )
 
         if next_index is None:
             log_message("No next item to play after move. Playback remains stopped.")

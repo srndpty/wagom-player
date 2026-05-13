@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from typing import Any, Optional
 
@@ -125,6 +125,24 @@ def update_state_snapshot(**fields: Any) -> None:
     with _lock:
         _state_snapshot.clear()
         _state_snapshot.update(snapshot)
+
+
+def record_exception(context: str, error: BaseException, **fields: Any) -> None:
+    log_message(f"{context}: {error!r}")
+    record_breadcrumb(f"{context}_error", error=repr(error), **fields)
+
+
+def run_safely(
+    context: str,
+    func: Callable[[], Any],
+    default: Any = None,
+    **fields: Any,
+) -> Any:
+    try:
+        return func()
+    except Exception as e:
+        record_exception(context, e, **fields)
+        return default
 
 
 def write_exception_report(

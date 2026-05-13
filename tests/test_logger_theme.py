@@ -1,8 +1,16 @@
 import os
 
-from PyQt5 import QtGui, QtWidgets
+import pytest
 
-from wagom_player import logger, theme
+from wagom_player import logger
+
+
+def _import_qt_theme_or_skip():
+    QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
+    QtWidgets = pytest.importorskip("PyQt5.QtWidgets", exc_type=ImportError)
+    from wagom_player import theme
+
+    return QtGui, QtWidgets, theme
 
 
 def test_logs_dir_uses_localappdata(monkeypatch, tmp_path):
@@ -44,6 +52,8 @@ def test_log_message_is_best_effort(monkeypatch, tmp_path):
 
 
 def test_resource_path_selects_package_or_project_resource_root():
+    _QtGui, _QtWidgets, theme = _import_qt_theme_or_skip()
+
     package_path = theme.resource_path("icons", "play.svg")
     resource_path = theme.resource_path("resources", "icons", "play.svg")
 
@@ -52,6 +62,8 @@ def test_resource_path_selects_package_or_project_resource_root():
 
 
 def test_apply_dark_theme_and_app_icon(qapp):
+    QtGui, QtWidgets, theme = _import_qt_theme_or_skip()
+
     theme.apply_dark_theme(qapp)
     icon = theme.apply_app_icon(qapp)
 
@@ -62,6 +74,7 @@ def test_apply_dark_theme_and_app_icon(qapp):
 
 
 def test_apply_windows_app_user_model_id_noops_off_windows(monkeypatch):
+    _QtGui, _QtWidgets, theme = _import_qt_theme_or_skip()
     monkeypatch.setattr(theme.sys, "platform", "linux")
 
     theme.apply_windows_app_user_model_id("test-id")

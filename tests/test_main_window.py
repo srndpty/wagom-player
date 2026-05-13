@@ -1,9 +1,12 @@
+import importlib
 import os
 
 import pytest
-from PyQt5 import QtCore, QtGui
 
-from wagom_player import main_window
+QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
+QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
+
+main_window = importlib.import_module("wagom_player.main_window")
 
 
 class FakeEventManager:

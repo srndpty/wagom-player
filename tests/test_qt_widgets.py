@@ -1,8 +1,19 @@
-from PyQt5 import QtCore, QtGui, QtWidgets
+import importlib
 
-from wagom_player.dialogs import MetadataDialog, ShortcutListDialog
-from wagom_player.overlay import OverlayLabel
-from wagom_player.seek_slider import SeekSlider
+import pytest
+
+QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
+QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
+QtWidgets = pytest.importorskip("PyQt5.QtWidgets", exc_type=ImportError)
+
+dialogs = importlib.import_module("wagom_player.dialogs")
+overlay = importlib.import_module("wagom_player.overlay")
+seek_slider = importlib.import_module("wagom_player.seek_slider")
+
+MetadataDialog = dialogs.MetadataDialog
+ShortcutListDialog = dialogs.ShortcutListDialog
+OverlayLabel = overlay.OverlayLabel
+SeekSlider = seek_slider.SeekSlider
 
 
 def _mouse_event(event_type, pos, button=QtCore.Qt.LeftButton, buttons=QtCore.Qt.LeftButton):

@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from PyQt5 import QtWidgets, QtCore, QtNetwork
 
+from wagom_player import diagnostics
 from wagom_player.logger import log_message
 from wagom_player.theme import (
     apply_dark_theme,
@@ -116,9 +117,11 @@ class SingleInstanceServer(QtCore.QObject):
             self.file_requested.emit(file_path)
 
 def main_wrapper(argv: List[str]) -> int:
+    diagnostics.start_session(argv)
+    diagnostics.install_excepthook()
     try:
         return main(argv)
-    except Exception:
+    except Exception as e:
         import traceback
         app = QtWidgets.QApplication.instance()
         if app is None:
@@ -129,6 +132,10 @@ def main_wrapper(argv: List[str]) -> int:
         detailed_text = traceback.format_exc()
         log_message("!!!!!!!!!! UNHANDLED EXCEPTION !!!!!!!!!!")
         log_message(detailed_text)
+        try:
+            diagnostics.write_exception_report(type(e), e, e.__traceback__)
+        except Exception:
+            pass
 
         msg_box = QtWidgets.QMessageBox()
         msg_box.setIcon(QtWidgets.QMessageBox.Critical)
@@ -160,6 +167,8 @@ def main(argv: List[str]) -> int:
     icon = apply_app_icon(app)
 
     # VideoPlayerウィンドウを作成し、単一のファイルパスを渡す
+    diagnostics.heartbeat()
+    diagnostics.start_hang_monitor()
     player_window = VideoPlayer(file=initial_file)
     player_window.setWindowIcon(icon)
     if single_instance_server is not None:

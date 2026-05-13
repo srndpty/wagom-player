@@ -40,15 +40,18 @@ _previous_excepthook = sys.excepthook
 
 def start_session(argv: Iterable[str]) -> str:
     global _argv
-    with _lock:
-        _argv = tuple(argv)
-    configure_session_log(_session_id)
-    _ensure_report_dir()
-    _cleanup_old_files(_reports_dir(), "hang-*.txt", MAX_REPORTS)
-    _cleanup_old_files(_reports_dir(), "exception-*.txt", MAX_REPORTS)
-    _cleanup_old_files(logs_dir(), "session-*.txt", MAX_REPORTS)
-    record_breadcrumb("session_start", argv=list(_argv), cwd=os.getcwd())
-    log_message(f"Diagnostics session started: session_id={_session_id}")
+    try:
+        with _lock:
+            _argv = tuple(argv)
+        configure_session_log(_session_id)
+        _ensure_report_dir()
+        _cleanup_old_files(_reports_dir(), "hang-*.txt", MAX_REPORTS)
+        _cleanup_old_files(_reports_dir(), "exception-*.txt", MAX_REPORTS)
+        _cleanup_old_files(logs_dir(), "session-*.txt", MAX_REPORTS)
+        record_breadcrumb("session_start", argv=list(_argv), cwd=os.getcwd())
+        log_message(f"Diagnostics session started: session_id={_session_id}")
+    except Exception:
+        pass
     return _session_id
 
 

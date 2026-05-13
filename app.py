@@ -132,7 +132,10 @@ def main_wrapper(argv: List[str]) -> int:
         detailed_text = traceback.format_exc()
         log_message("!!!!!!!!!! UNHANDLED EXCEPTION !!!!!!!!!!")
         log_message(detailed_text)
-        diagnostics.write_exception_report(type(e), e, e.__traceback__)
+        try:
+            diagnostics.write_exception_report(type(e), e, e.__traceback__)
+        except Exception:
+            pass
 
         msg_box = QtWidgets.QMessageBox()
         msg_box.setIcon(QtWidgets.QMessageBox.Critical)

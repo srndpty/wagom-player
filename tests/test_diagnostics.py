@@ -47,3 +47,12 @@ def test_exception_report_writes_full_path(tmp_path, monkeypatch):
         text = f.read()
     assert full_path in text
     assert "RuntimeError: boom" in text
+
+
+def test_start_session_is_best_effort_when_report_dir_fails(monkeypatch):
+    def fail_report_dir():
+        raise OSError("read only")
+
+    monkeypatch.setattr(diagnostics, "_ensure_report_dir", fail_report_dir)
+
+    assert diagnostics.start_session(["wagom-player"]) == diagnostics._session_id

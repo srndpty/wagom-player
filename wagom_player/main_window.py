@@ -31,6 +31,11 @@ from .playlist_state import (
 from .seek_slider import SeekSlider
 from .shortcuts import SHORTCUT_ROWS
 from .theme import resource_path
+from .ui_styles import (
+    SEEK_SLIDER_STYLE_NORMAL,
+    SEEK_SLIDER_STYLE_WARNING,
+    VOLUME_SLIDER_STYLE,
+)
 
 try:
     import vlc
@@ -87,50 +92,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.duration_overlay_label = self.overlay.label
         self.duration_overlay_timer = self.overlay.timer
 
-        self.SEEK_SLIDER_STYLE_NORMAL = """
-            QSlider::groove:horizontal {
-                border: none;
-                height: 4px;
-                background: #555;
-                border-radius: 2px;
-                margin: 0px 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #4a90e2; /* 青色 */
-                border: none;
-                width: 8px;
-                height: 14px;
-                border-radius: 4px;
-                margin: -5px -4px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #4a90e2; /* 青色 */
-                border: none;
-                border-radius: 2px;
-            }
-        """
-        self.SEEK_SLIDER_STYLE_WARNING = """
-            QSlider::groove:horizontal {
-                border: none;
-                height: 4px;
-                background: #555;
-                border-radius: 2px;
-                margin: 0px 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #f5a623; /* 黄色 */
-                border: none;
-                width: 8px;
-                height: 14px;
-                border-radius: 4px;
-                margin: -5px -4px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #f5a623; /* 黄色 */
-                border: none;
-                border-radius: 2px;
-            }
-        """
+        self.SEEK_SLIDER_STYLE_NORMAL = SEEK_SLIDER_STYLE_NORMAL
+        self.SEEK_SLIDER_STYLE_WARNING = SEEK_SLIDER_STYLE_WARNING
         # 現在のシークバーの状態を管理するフラグ
         self._is_seek_bar_warning = False
         # 初期スタイルを適用
@@ -154,22 +117,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._ending: bool = False
 
         # 初期音量
-        try:
-            self.player.audio_set_volume(int(self.volume_slider.value()))
-        except Exception:
-            pass
+        diagnostics.run_safely(
+            "initial_audio_set_volume",
+            lambda: self.player.audio_set_volume(int(self.volume_slider.value())),
+        )
         self._muted: bool = False
-        try:
-            m = self.player.audio_get_mute()
-            if m in (0, 1):
-                self._muted = m == 1
-        except Exception:
-            pass
+        m = diagnostics.run_safely("initial_audio_get_mute", self.player.audio_get_mute)
+        if m in (0, 1):
+            self._muted = m == 1
         self._update_volume_label()
-        try:
-            self.player.set_rate(self.playback_rate)
-        except Exception:
-            pass
+        diagnostics.run_safely("initial_set_rate", lambda: self.player.set_rate(self.playback_rate))
 
         # ショートカット
         self._setup_shortcuts()
@@ -243,33 +200,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         ctrl.addWidget(self.volume_icon)
         ctrl.addWidget(self.volume_label)
         ctrl.addWidget(self.volume_slider)
-        volume_slider_style = """
-            #VolumeSlider {
-                min-height: 22px;
-            }
-            #VolumeSlider::groove:horizontal {
-                border: none;
-                height: 4px;
-                background: #555;
-                border-radius: 2px;
-                margin: 0px 4px; /* ハンドルの幅の半分 */
-            }
-            #VolumeSlider::handle:horizontal {
-                background: #4a90e2;
-                border: none;
-                width: 8px;   /* 幅を狭く */
-                height: 14px; /* 高さを確保 */
-                border-radius: 4px; /* 角を丸める */
-                margin: -5px -4px; /* (14-4)/2=5, 8/2=4 */
-            }
-            #VolumeSlider::sub-page:horizontal {
-                background: #4a90e2;
-                border: none;
-                border-radius: 2px;
-            }
-        """
         # 既存のスタイルシートに追記する
-        self.setStyleSheet(self.styleSheet() + volume_slider_style)
+        self.setStyleSheet(self.styleSheet() + VOLUME_SLIDER_STYLE)
         self.status = self.statusBar()
         self.status.showMessage("準備完了")
 
@@ -373,10 +305,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
                         ctypes.byref(value),
                         ctypes.sizeof(value),
                     )
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    diagnostics.record_exception(
+                        "apply_windows_dark_titlebar_attribute", e, attr=attr
+                    )
+        except Exception as e:
+            diagnostics.record_exception("apply_windows_dark_titlebar", e)
 
     def _load_file_and_directory(self, file_path: str):
         """指定されたファイルを開き、そのディレクトリ内の動画ファイルをリストアップする"""
@@ -474,10 +408,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # ミュート状態は保存しない（常に起動時はミュートOFF）
         self._muted = False
-        try:
-            self.player.audio_set_mute(False)
-        except Exception:
-            pass
+        diagnostics.run_safely(
+            "load_settings_audio_set_mute",
+            lambda: self.player.audio_set_mute(False),
+        )
         self._update_volume_label()
 
         # ウィンドウ配置
@@ -494,13 +428,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._update_repeat_button()
 
     def _save_settings(self) -> None:
-        try:
+        def _save() -> None:
             self.settings.setValue("volume", int(self.volume_slider.value()))
             self.settings.setValue("geometry", self.saveGeometry())
             self.settings.setValue("isMaximized", self.isMaximized())
             self.settings.setValue("repeat", bool(self.repeat_enabled))
-        except Exception:
-            pass
+
+        diagnostics.run_safely("save_settings", _save)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
         self._save_settings()
@@ -689,10 +623,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents()
             self._bind_video_surface()
 
-            try:
-                self.player.set_rate(self.playback_rate)
-            except Exception:
-                pass
+            diagnostics.run_safely(
+                "play_at_set_rate",
+                lambda: self.player.set_rate(self.playback_rate),
+                path=path,
+            )
 
             diagnostics.record_breadcrumb("play_at_before_player_play", path=path)
             self.player.play()
@@ -820,23 +755,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
             if length > 0:
                 new_t = max(min(new_t, length - 1000), 0)
             self.player.set_time(new_t)
-        except Exception:
-            pass
+        except Exception as e:
+            diagnostics.record_exception("seek_by", e, delta_ms=delta_ms)
 
     # ------------- キー操作 -------------
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
         key = event.key()
         mods = event.modifiers()
         is_keypad = bool(mods & QtCore.Qt.KeypadModifier)
-
-        # if key == QtCore.Qt.Key_Left:
-        #     self.seek_by(-self.SEEK_SHORT_MS)
-        #     event.accept()
-        #     return
-        # if key == QtCore.Qt.Key_Right:
-        #     self.seek_by(self.SEEK_SHORT_MS)
-        #     event.accept()
-        #     return
 
         if is_keypad and key == QtCore.Qt.Key_4:
             # Num4: 60秒進む
@@ -1104,8 +1030,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         diagnostics.record_breadcrumb("seek_released", value=val)
         try:
             self.player.set_time(val)
-        except Exception:
-            pass
+        except Exception as e:
+            diagnostics.record_exception("seek_released_set_time", e, value=val)
 
     def _on_slider_moved(self, value: int) -> None:
         diagnostics.record_breadcrumb("slider_moved", value=value)
@@ -1118,8 +1044,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         diagnostics.record_breadcrumb("slider_clicked", value=value)
         try:
             self.player.set_time(value)
-        except Exception:
-            pass
+        except Exception as e:
+            diagnostics.record_exception("slider_clicked_set_time", e, value=value)
 
     # ------------- 再生速度操作 -------------
     def _change_playback_rate(self, delta: float) -> None:
@@ -1128,8 +1054,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         )
         try:
             self.player.set_rate(new_rate)
-        except Exception:
-            pass
+        except Exception as e:
+            diagnostics.record_exception("change_playback_rate_set_rate", e, rate=new_rate)
         self.playback_rate = new_rate
         diagnostics.record_breadcrumb("change_playback_rate", rate=new_rate)
         self._show_overlay(f"[再生速度:{new_rate:.1f}倍]")
@@ -1139,8 +1065,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         diagnostics.record_breadcrumb("volume_changed", value=int(value))
         try:
             self.player.audio_set_volume(int(value))
-        except Exception:
-            pass
+        except Exception as e:
+            diagnostics.record_exception("volume_changed_audio_set_volume", e, value=int(value))
         self._update_volume_label()
         self._show_overlay(f"[ボリューム:{int(value)}%]")
 
@@ -1209,8 +1135,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         diagnostics.record_breadcrumb("toggle_mute", muted=self._muted)
         try:
             self.player.audio_toggle_mute()
-        except Exception:
-            pass
+        except Exception as e:
+            diagnostics.record_exception("toggle_mute_audio_toggle_mute", e, muted=self._muted)
         self._update_volume_label()
 
     # ------------- ファイルダイアログ -------------
@@ -1229,8 +1155,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             diagnostics.record_breadcrumb("open_files_dialog_selected", path=file)
             try:
                 self.settings.setValue("last_dir", os.path.dirname(file))
-            except Exception:
-                pass
+            except Exception as e:
+                diagnostics.record_exception("open_files_dialog_save_last_dir", e, path=file)
             self._load_file_and_directory(file)
 
     # ------------- ファイル移動と次の動画再生 -------------

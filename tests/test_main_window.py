@@ -418,6 +418,7 @@ def test_move_current_file_updates_playlist_without_real_play(player, tmp_path, 
     assert (tmp_path / "_ok" / "a.mp4").exists()
     assert player.directory_playlist == [str(second)]
     assert calls == [0]
+    assert player.player.media is None
 
 
 def test_metadata_dialog_receives_collected_text(player, monkeypatch):
@@ -469,4 +470,14 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
         QtCore.Qt.KeypadModifier,
     )
     player.keyPressEvent(event)
+    assert seeks == [player.SEEK_LONG_MS]
+
+    repeat_event = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_4,
+        QtCore.Qt.KeypadModifier,
+        "",
+        True,
+    )
+    player.keyPressEvent(repeat_event)
     assert seeks == [player.SEEK_LONG_MS]

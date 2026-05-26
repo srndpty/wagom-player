@@ -115,6 +115,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._seeking_user: bool = False
         self._media_length: int = -1
         self._ending: bool = False
+        self._last_keypad_seek_msec: int = 0
 
         # 初期音量
         diagnostics.run_safely(
@@ -755,8 +756,20 @@ class VideoPlayer(QtWidgets.QMainWindow):
             if length > 0:
                 new_t = max(min(new_t, length - 1000), 0)
             self.player.set_time(new_t)
+            self._show_overlay(f"[{self._format_ms(new_t)}]")
         except Exception as e:
             diagnostics.record_exception("seek_by", e, delta_ms=delta_ms)
+
+    def _should_ignore_keypad_seek(self, event: QtGui.QKeyEvent) -> bool:
+        if event.isAutoRepeat():
+            return True
+
+        now = QtCore.QDateTime.currentMSecsSinceEpoch()
+        if now - self._last_keypad_seek_msec < 150:
+            return True
+
+        self._last_keypad_seek_msec = now
+        return False
 
     # ------------- キー操作 -------------
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
@@ -766,11 +779,17 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         if is_keypad and key == QtCore.Qt.Key_4:
             # Num4: 60秒進む
+            if self._should_ignore_keypad_seek(event):
+                event.accept()
+                return
             self.seek_by(self.SEEK_LONG_MS)
             event.accept()
             return
         if is_keypad and key == QtCore.Qt.Key_1:
             # Num1: 60秒戻る
+            if self._should_ignore_keypad_seek(event):
+                event.accept()
+                return
             self.seek_by(-self.SEEK_LONG_MS)
             event.accept()
             return
@@ -847,6 +866,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # Iキーでメタデータ情報表示
         self._sc_metadata = mk(QtCore.Qt.Key_I, self._show_metadata_dialog)
+
+    def _release_current_media_for_file_operation(self) -> None:
+        log_message("Stopping playback to release file lock...")
+        self.stop()
+        try:
+            self.player.set_media(None)
+        except Exception as e:
+            diagnostics.record_exception("move_current_file_clear_media", e)
+        QtWidgets.QApplication.processEvents()
 
     def _current_file_path(self) -> str:
         if 0 <= self.current_index < len(self.directory_playlist):
@@ -1185,8 +1213,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             next_path = next_path_after_current(playlist, current_file_path)
 
         # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
-        log_message("Stopping playback to release file lock...")
-        self.stop()
+        self._release_current_media_for_file_operation()
 
         # --- ファイルパスの準備 (停止後に行っても問題ない) ---
         file_name = os.path.basename(current_file_path)
@@ -1196,7 +1223,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # --- 移動処理 ---
         try:
-            target_file_path = move_file_to_subfolder(current_file_path, subfolder_name)
+            target_file_path = move_file_to_subfolder(
+                current_file_path,
+                subfolder_name,
+                retry_delays=(0.2, 0.5, 1.0, 2.0),
+            )
             self.status.showMessage(f"移動完了: {file_name} -> {subfolder_name}", 4000)
             log_message(f"Successfully moved file to '{target_file_path}'")
             diagnostics.record_breadcrumb(

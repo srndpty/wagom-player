@@ -48,6 +48,34 @@ def _configure_runtime_environment() -> None:
     log_message(f"PYTHON_VLC_LIB_PATH={os.environ.get('PYTHON_VLC_LIB_PATH', '')!r}")
 
 
+def _claim_single_instance(initial_file: Optional[str]):
+    """既存プロセスへ転送するか、このプロセス用の IPC サーバを確保する。"""
+    if send_to_existing_instance(initial_file):
+        log_message("Existing wagom-player instance found. Forwarded request and exiting.")
+        return None, True
+
+    single_instance_server = create_single_instance_server(remove_stale=False)
+    if single_instance_server is not None:
+        return single_instance_server, False
+
+    # 同時起動時は、最初の送信時点ではサーバ未作成でも、この時点で他方が作成済みの
+    # ことがある。stale socket を消す前に再送して、稼働中のインスタンスを壊さない。
+    if send_to_existing_instance(initial_file, timeout_ms=1000):
+        log_message("Existing wagom-player instance appeared. Forwarded request and exiting.")
+        return None, True
+
+    single_instance_server = create_single_instance_server(remove_stale=True)
+    if single_instance_server is not None:
+        return single_instance_server, False
+
+    if send_to_existing_instance(initial_file, timeout_ms=1000):
+        log_message("Existing wagom-player instance found after retry. Forwarded request.")
+        return None, True
+
+    log_message("Single-instance server unavailable; continuing without IPC.")
+    return None, False
+
+
 def main_wrapper(argv: list[str]) -> int:
     diagnostics.start_session(argv)
     diagnostics.install_excepthook()
@@ -91,11 +119,10 @@ def main(argv: list[str]) -> int:
 
     initial_file = _find_initial_file(argv)
     log_message(f"initial_file={initial_file!r}")
-    if send_to_existing_instance(initial_file):
-        log_message("Existing wagom-player instance found. Forwarded request and exiting.")
+    single_instance_server, forwarded = _claim_single_instance(initial_file)
+    if forwarded:
         return 0
 
-    single_instance_server = create_single_instance_server()
     apply_dark_theme(app)
     apply_windows_app_user_model_id("wagom-player")
     icon = apply_app_icon(app)

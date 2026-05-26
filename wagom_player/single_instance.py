@@ -40,7 +40,10 @@ def create_single_instance_server(
         return server
 
     if not remove_stale:
-        log_message(f"Failed to start single-instance server: {server.errorString()}")
+        log_message(
+            "Single-instance server not acquired without stale removal: "
+            f"{server.errorString()}"
+        )
         return None
 
     QtNetwork.QLocalServer.removeServer(server_name)

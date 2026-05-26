@@ -115,7 +115,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._seeking_user: bool = False
         self._media_length: int = -1
         self._ending: bool = False
-        self._last_keypad_seek_msec: int = 0
+        self._last_keypad_seek_msec_by_key: dict[int, int] = {}
+        self._file_operation_in_progress: bool = False
 
         # 初期音量
         diagnostics.run_safely(
@@ -464,6 +465,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         if getattr(self, "_is_changing_media", False):
             log_message("_on_media_end(): ignored because _is_changing_media")
             return
+        if getattr(self, "_file_operation_in_progress", False):
+            log_message("_on_media_end(): ignored because file operation is in progress")
+            return
 
         playlist = self._get_current_playlist()
         if not playlist:
@@ -764,11 +768,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         if event.isAutoRepeat():
             return True
 
+        key = int(event.key())
         now = QtCore.QDateTime.currentMSecsSinceEpoch()
-        if now - self._last_keypad_seek_msec < 150:
+        last = self._last_keypad_seek_msec_by_key.get(key, 0)
+        if now - last < 150:
             return True
 
-        self._last_keypad_seek_msec = now
+        self._last_keypad_seek_msec_by_key[key] = now
         return False
 
     # ------------- キー操作 -------------
@@ -1191,6 +1197,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _move_current_file_and_play_next(self, subfolder_name: str):
         """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
         diagnostics.record_breadcrumb("move_current_file_requested", subfolder=subfolder_name)
+        if self._file_operation_in_progress:
+            log_message("Move requested, but another file operation is already in progress.")
+            return
+
         # 再生中でない、またはプレイリストが空の場合は何もしない
         if not (0 <= self.current_index < len(self.directory_playlist)):
             log_message("Move requested, but no file is playing.")
@@ -1206,80 +1216,89 @@ class VideoPlayer(QtWidgets.QMainWindow):
             index=index_to_remove,
         )
 
-        # ★ シャッフル時に「シャッフル順の次」を覚えておく
-        next_path = None
-        if self.shuffle_enabled:
-            playlist = self._get_current_playlist()
-            next_path = next_path_after_current(playlist, current_file_path)
-
-        # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
-        self._release_current_media_for_file_operation()
-
-        # --- ファイルパスの準備 (停止後に行っても問題ない) ---
-        file_name = os.path.basename(current_file_path)
-        target_file_path = target_path_for_subfolder(current_file_path, subfolder_name)
-
-        log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
-
-        # --- 移動処理 ---
         try:
-            target_file_path = move_file_to_subfolder(
-                current_file_path,
-                subfolder_name,
-                retry_delays=(0.2, 0.5, 1.0, 2.0),
+            self._file_operation_in_progress = True
+
+            # ★ シャッフル時に「シャッフル順の次」を覚えておく
+            next_path = None
+            if self.shuffle_enabled:
+                playlist = self._get_current_playlist()
+                next_path = next_path_after_current(playlist, current_file_path)
+
+            # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
+            self._release_current_media_for_file_operation()
+
+            # --- ファイルパスの準備 (停止後に行っても問題ない) ---
+            file_name = os.path.basename(current_file_path)
+            target_file_path = target_path_for_subfolder(current_file_path, subfolder_name)
+
+            log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
+
+            # --- 移動処理 ---
+            try:
+                target_file_path = move_file_to_subfolder(
+                    current_file_path,
+                    subfolder_name,
+                    retry_delays=(0.2, 0.5, 1.0, 2.0),
+                )
+                self.status.showMessage(f"移動完了: {file_name} -> {subfolder_name}", 4000)
+                log_message(f"Successfully moved file to '{target_file_path}'")
+                diagnostics.record_breadcrumb(
+                    "move_current_file_success",
+                    source=current_file_path,
+                    target=target_file_path,
+                )
+
+            except TargetFileExistsError:
+                log_message(
+                    f"File '{file_name}' already exists in target directory. Skipping move."
+                )
+                self.status.showMessage(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
+                diagnostics.record_breadcrumb(
+                    "move_current_file_target_exists", target=target_file_path
+                )
+                # ファイルが存在した場合、次の曲の再生は行わずに待機する
+                return
+            except Exception as e:
+                log_message(f"Error moving file: {e}")
+                self.status.showMessage(f"ファイル移動中にエラーが発生しました: {e}", 5000)
+                diagnostics.record_breadcrumb("move_current_file_error", error=str(e))
+                # エラーが発生した場合も、次の曲の再生は行わずに待機する
+                return
+
+            # --- プレイリストの更新と次の曲の再生 ---
+
+            # プレイリストから該当ファイルを削除
+            self.directory_playlist.pop(index_to_remove)
+            # 2. シャッフルリストからも削除
+            if self.shuffle_enabled and current_file_path in self.shuffled_playlist:
+                self.shuffled_playlist.remove(current_file_path)
+
+            # ウィンドウタイトルの表示を更新
+            self._update_window_title()
+
+            # もう再生できるものがない
+            if not self.directory_playlist:
+                log_message("Playlist is now empty. Playback remains stopped.")
+                self.stop()
+                return
+
+            # 次に再生する index を決定
+            next_index = next_index_after_removal(
+                self.directory_playlist,
+                index_to_remove,
+                self.shuffle_enabled,
+                next_path,
             )
-            self.status.showMessage(f"移動完了: {file_name} -> {subfolder_name}", 4000)
-            log_message(f"Successfully moved file to '{target_file_path}'")
-            diagnostics.record_breadcrumb(
-                "move_current_file_success", source=current_file_path, target=target_file_path
-            )
 
-        except TargetFileExistsError:
-            log_message(f"File '{file_name}' already exists in target directory. Skipping move.")
-            self.status.showMessage(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
-            diagnostics.record_breadcrumb(
-                "move_current_file_target_exists", target=target_file_path
-            )
-            # ファイルが存在した場合、次の曲の再生は行わずに待機する
-            return
-        except Exception as e:
-            log_message(f"Error moving file: {e}")
-            self.status.showMessage(f"ファイル移動中にエラーが発生しました: {e}", 5000)
-            diagnostics.record_breadcrumb("move_current_file_error", error=str(e))
-            # エラーが発生した場合も、次の曲の再生は行わずに待機する
-            return
-
-        # --- プレイリストの更新と次の曲の再生 ---
-
-        # プレイリストから該当ファイルを削除
-        self.directory_playlist.pop(index_to_remove)
-        # 2. シャッフルリストからも削除
-        if self.shuffle_enabled and current_file_path in self.shuffled_playlist:
-            self.shuffled_playlist.remove(current_file_path)
-
-        # ウィンドウタイトルの表示を更新
-        self._update_window_title()
-
-        # もう再生できるものがない
-        if not self.directory_playlist:
-            log_message("Playlist is now empty. Playback remains stopped.")
-            self.stop()
-            return
-
-        # 次に再生する index を決定
-        next_index = next_index_after_removal(
-            self.directory_playlist,
-            index_to_remove,
-            self.shuffle_enabled,
-            next_path,
-        )
-
-        if next_index is None:
-            log_message("No next item to play after move. Playback remains stopped.")
-            self.stop()
-        else:
-            log_message(f"Playing next item at index {next_index}.")
-            QtCore.QTimer.singleShot(50, lambda idx=next_index: self.play_at(idx))
+            if next_index is None:
+                log_message("No next item to play after move. Playback remains stopped.")
+                self.stop()
+            else:
+                log_message(f"Playing next item at index {next_index}.")
+                QtCore.QTimer.singleShot(50, lambda idx=next_index: self.play_at(idx))
+        finally:
+            self._file_operation_in_progress = False
 
     def _update_overlay_geometry(self):
         """

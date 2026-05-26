@@ -29,7 +29,11 @@ def test_claim_single_instance_retries_forward_before_removing_stale(monkeypatch
 
 def test_claim_single_instance_uses_server_when_available(monkeypatch):
     server = object()
-    monkeypatch.setattr(app_module, "send_to_existing_instance", lambda _file_path: False)
+    monkeypatch.setattr(
+        app_module,
+        "send_to_existing_instance",
+        lambda _file_path, timeout_ms=500: False,
+    )
     monkeypatch.setattr(
         app_module,
         "create_single_instance_server",

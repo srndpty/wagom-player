@@ -1,5 +1,6 @@
 param(
-    [string] $DiffRange = ""
+    [string] $DiffRange = "",
+    [switch] $Fix
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,12 +30,22 @@ function Invoke-Step {
     }
 }
 
-Invoke-Step "ruff format check" {
-    & $python -m ruff format --check .
-}
+if ($Fix) {
+    Invoke-Step "ruff format" {
+        & $python -m ruff format .
+    }
 
-Invoke-Step "ruff lint" {
-    & $python -m ruff check .
+    Invoke-Step "ruff lint fix" {
+        & $python -m ruff check . --fix
+    }
+} else {
+    Invoke-Step "ruff format check" {
+        & $python -m ruff format --check .
+    }
+
+    Invoke-Step "ruff lint" {
+        & $python -m ruff check .
+    }
 }
 
 Invoke-Step "pytest with coverage" {

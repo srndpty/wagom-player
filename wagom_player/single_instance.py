@@ -41,8 +41,7 @@ def create_single_instance_server(
 
     if not remove_stale:
         log_message(
-            "Single-instance server not acquired without stale removal: "
-            f"{server.errorString()}"
+            f"Single-instance server not acquired without stale removal: {server.errorString()}"
         )
         return None
 

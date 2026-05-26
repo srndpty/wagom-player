@@ -32,10 +32,18 @@ def send_to_existing_instance(
 
 def create_single_instance_server(
     server_name: str = SINGLE_INSTANCE_SERVER_NAME,
+    *,
+    remove_stale: bool = True,
 ) -> Optional[QtNetwork.QLocalServer]:
     server = QtNetwork.QLocalServer()
     if server.listen(server_name):
         return server
+
+    if not remove_stale:
+        log_message(
+            f"Single-instance server not acquired without stale removal: {server.errorString()}"
+        )
+        return None
 
     QtNetwork.QLocalServer.removeServer(server_name)
     if server.listen(server_name):

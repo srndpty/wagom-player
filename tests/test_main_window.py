@@ -418,6 +418,20 @@ def test_move_current_file_updates_playlist_without_real_play(player, tmp_path, 
     assert (tmp_path / "_ok" / "a.mp4").exists()
     assert player.directory_playlist == [str(second)]
     assert calls == [0]
+    assert player.player.media is None
+    assert not player._file_operation_in_progress
+
+
+def test_media_end_ignored_during_file_operation(player, monkeypatch):
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+    player._file_operation_in_progress = True
+    calls = []
+    monkeypatch.setattr(player, "_play_at_with_reason", lambda index, reason: calls.append(index))
+
+    player._on_media_end()
+
+    assert calls == []
 
 
 def test_metadata_dialog_receives_collected_text(player, monkeypatch):
@@ -470,3 +484,21 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
     )
     player.keyPressEvent(event)
     assert seeks == [player.SEEK_LONG_MS]
+
+    repeat_event = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_4,
+        QtCore.Qt.KeypadModifier,
+        "",
+        True,
+    )
+    player.keyPressEvent(repeat_event)
+    assert seeks == [player.SEEK_LONG_MS]
+
+    previous_event = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_1,
+        QtCore.Qt.KeypadModifier,
+    )
+    player.keyPressEvent(previous_event)
+    assert seeks == [player.SEEK_LONG_MS, -player.SEEK_LONG_MS]

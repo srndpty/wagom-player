@@ -60,4 +60,5 @@ class OverlayLabel:
         )
 
     def resize_to_frame_rect(self) -> None:
-        self.label.setGeometry(self.video_frame.rect())
+        if self.label.isVisible():
+            self.update_geometry()

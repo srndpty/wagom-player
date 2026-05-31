@@ -57,11 +57,25 @@ def test_overlay_label_show_hide_and_geometry(qapp):
     assert overlay.label.isVisible()
     assert overlay.timer.interval() == 50
 
+    # 表示中のリサイズ: update_geometry() が呼ばれラベルは表示されたまま
     overlay.resize_to_frame_rect()
-    assert overlay.label.geometry() == frame.rect()
+    assert overlay.label.isVisible()
 
     overlay.hide()
     assert not overlay.label.isVisible()
+
+
+def test_overlay_resize_to_frame_rect_does_nothing_when_hidden(qapp):
+    window = QtWidgets.QWidget()
+    frame = QtWidgets.QFrame(window)
+    frame.setGeometry(10, 20, 200, 100)
+    overlay = OverlayLabel(window, frame)
+    overlay.label.setGeometry(5, 5, 50, 50)
+
+    # 非表示時はジオメトリを変更しない
+    assert not overlay.label.isVisible()
+    overlay.resize_to_frame_rect()
+    assert overlay.label.geometry() == QtCore.QRect(5, 5, 50, 50)
 
 
 def test_overlay_geometry_ignores_hidden_frame(qapp):

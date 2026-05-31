@@ -117,6 +117,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._ending: bool = False
         self._last_keypad_seek_msec_by_key: dict[int, int] = {}
         self._file_operation_in_progress: bool = False
+        self._status_priority_until_msec: int = 0
 
         # 初期音量
         diagnostics.run_safely(
@@ -327,7 +328,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             video_files = collect_video_files(directory)
         except OSError as e:
             log_message(f"Error scanning directory: {e}")
-            self.status.showMessage(f"ディレクトリのスキャンに失敗しました: {e}", 5000)
+            self._show_status_message(f"ディレクトリのスキャンに失敗しました: {e}", 5000)
             return
 
         if not video_files:
@@ -367,7 +368,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         if not os.path.isfile(file_path):
             log_message(f"External open ignored because file does not exist: {file_path}")
-            self.status.showMessage(f"ファイルが見つかりません: {file_path}", 5000)
+            self._show_status_message(f"ファイルが見つかりません: {file_path}", 5000)
             return
 
         normalized = self._normalize_external_file_path(file_path)
@@ -377,7 +378,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             and now - self._last_external_file_msec < 3000
         ):
             log_message(f"Duplicate external open ignored: {file_path}")
-            self.status.showMessage("同じファイルの連続起動を無視しました", 2500)
+            self._show_status_message("同じファイルの連続起動を無視しました", 2500)
             return
 
         self._load_file_and_directory(file_path)
@@ -541,26 +542,25 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         self._ending = True
 
-        try:
-            next_original_idx = adjacent_index(
-                self.directory_playlist,
-                playlist,
-                self.current_index,
-                1,
+        next_original_idx = adjacent_index(
+            self.directory_playlist,
+            playlist,
+            self.current_index,
+            1,
+        )
+        if next_original_idx is not None:
+            next_track_path = self.directory_playlist[next_original_idx]
+            log_message(
+                "_on_media_end(): moving to next track "
+                f"idx={next_original_idx}, path={next_track_path}"
             )
-            if next_original_idx is not None:
-                next_track_path = self.directory_playlist[next_original_idx]
-                log_message(
-                    "_on_media_end(): moving to next track "
-                    f"idx={next_original_idx}, path={next_track_path}"
-                )
-                QtCore.QTimer.singleShot(80, lambda idx=next_original_idx: self._end_after(idx))
-            else:
-                log_message("_on_media_end(): reached end of playlist (repeat off) -> stop()")
-                self.stop()
-        finally:
-            # 次の曲に進む処理が終わったら _ending を戻す
+            # _ending は _end_after が実行されるまで True のまま保持し、
+            # その間に届く重複 EndReached イベントを抑制する
+            QtCore.QTimer.singleShot(80, lambda idx=next_original_idx: self._end_after(idx))
+        else:
+            log_message("_on_media_end(): reached end of playlist (repeat off) -> stop()")
             self._ending = False
+            self.stop()
 
     def _end_after(self, idx: int) -> None:
         log_message(f"_end_after(): idx={idx}, current_index(before)={self.current_index}")
@@ -625,7 +625,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 diagnostics.record_breadcrumb("play_at_media_setup_error", error=str(e))
                 return
 
-            QtWidgets.QApplication.processEvents()
             self._bind_video_surface()
 
             diagnostics.run_safely(
@@ -891,12 +890,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
         """現在再生中のファイル名だけをクリップボードにコピーする"""
         current_path = self._current_file_path()
         if not current_path:
-            self.status.showMessage("再生中のファイルがありません", 3000)
+            self._show_status_message("再生中のファイルがありません", 3000)
             return
 
         filename = os.path.basename(current_path)
         QtWidgets.QApplication.clipboard().setText(filename)
-        self.status.showMessage(f"ファイル名をコピーしました: {filename}", 3000)
+        self._show_status_message(f"ファイル名をコピーしました: {filename}", 3000)
         self._show_overlay("[ファイル名をコピー]")
 
     def _show_shortcut_list_dialog(self) -> None:
@@ -930,6 +929,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         """オーバーレイラベルにテキストを表示し、一定時間後に非表示にする"""
         self.overlay.show(text, duration_ms)
 
+    def _show_status_message(self, msg: str, timeout_ms: int) -> None:
+        """タイムアウト付きステータスメッセージを表示し、その間タイマーの上書きを抑制する"""
+        self._status_priority_until_msec = QtCore.QDateTime.currentMSecsSinceEpoch() + timeout_ms
+        self.status.showMessage(msg, timeout_ms)
+
     # ------------- ステータス更新 -------------
     def _update_status_time(self) -> None:
         if not self.player:
@@ -939,7 +943,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         total = self.player.get_length()
 
         if cur >= 0 and total > 0:
-            self.status.showMessage(f"{self._format_ms(cur)} / {self._format_ms(total)}")
+            now_msec = QtCore.QDateTime.currentMSecsSinceEpoch()
+            if now_msec >= self._status_priority_until_msec:
+                self.status.showMessage(f"{self._format_ms(cur)} / {self._format_ms(total)}")
             if total != self._media_length:
                 self._media_length = total
                 self.seek_slider.blockSignals(True)
@@ -1241,7 +1247,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                     subfolder_name,
                     retry_delays=(0.2, 0.5, 1.0, 2.0),
                 )
-                self.status.showMessage(f"移動完了: {file_name} -> {subfolder_name}", 4000)
+                self._show_status_message(f"移動完了: {file_name} -> {subfolder_name}", 4000)
                 log_message(f"Successfully moved file to '{target_file_path}'")
                 diagnostics.record_breadcrumb(
                     "move_current_file_success",
@@ -1253,7 +1259,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 log_message(
                     f"File '{file_name}' already exists in target directory. Skipping move."
                 )
-                self.status.showMessage(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
+                self._show_status_message(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
                 diagnostics.record_breadcrumb(
                     "move_current_file_target_exists", target=target_file_path
                 )
@@ -1261,7 +1267,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 return
             except Exception as e:
                 log_message(f"Error moving file: {e}")
-                self.status.showMessage(f"ファイル移動中にエラーが発生しました: {e}", 5000)
+                self._show_status_message(f"ファイル移動中にエラーが発生しました: {e}", 5000)
                 diagnostics.record_breadcrumb("move_current_file_error", error=str(e))
                 # エラーが発生した場合も、次の曲の再生は行わずに待機する
                 return
@@ -1325,7 +1331,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         diagnostics.record_breadcrumb("show_metadata_dialog")
         # 再生中でなければ何もしない
         if not (0 <= self.current_index < len(self.directory_playlist)):
-            self.status.showMessage("再生中のファイルがありません", 3000)
+            self._show_status_message("再生中のファイルがありません", 3000)
             return
 
         media = self.player.get_media()

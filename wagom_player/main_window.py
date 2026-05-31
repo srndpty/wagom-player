@@ -542,12 +542,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         self._ending = True
 
-        next_original_idx = adjacent_index(
-            self.directory_playlist,
-            playlist,
-            self.current_index,
-            1,
-        )
+        try:
+            next_original_idx = adjacent_index(
+                self.directory_playlist,
+                playlist,
+                self.current_index,
+                1,
+            )
+        except Exception as e:
+            log_message(f"_on_media_end(): adjacent_index error: {e}")
+            self._ending = False
+            return
+
         if next_original_idx is not None:
             next_track_path = self.directory_playlist[next_original_idx]
             log_message(
@@ -564,8 +570,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _end_after(self, idx: int) -> None:
         log_message(f"_end_after(): idx={idx}, current_index(before)={self.current_index}")
-        self._ending = False
-        self._play_at_with_reason(idx, "from_end")
+        try:
+            self._play_at_with_reason(idx, "from_end")
+        finally:
+            self._ending = False
 
     def _bind_video_surface(self) -> None:
         wid = int(self.video_frame.winId())

@@ -19,12 +19,12 @@ def configure_session_log(session_id: str) -> None:
             return
         os.makedirs(base, exist_ok=True)
         _session_log_path = os.path.join(base, f"session-{session_id}.txt")
-        _rotate_last_run(base)
+        _truncate_last_run_if_too_large(base)
     except Exception:
         _session_log_path = None
 
 
-def _rotate_last_run(base: str) -> None:
+def _truncate_last_run_if_too_large(base: str) -> None:
     path = os.path.join(base, "last-run.txt")
     try:
         if os.path.getsize(path) > _LAST_RUN_MAX_BYTES:

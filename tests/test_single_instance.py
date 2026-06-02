@@ -57,3 +57,32 @@ def test_send_to_existing_instance_returns_false_without_server():
         timeout_ms=20,
         server_name=server_name,
     )
+
+
+def test_single_instance_server_ignores_invalid_and_large_payload(qapp):
+    server_name = f"wagom-player-test-{uuid.uuid4()}"
+    server = single_instance.create_single_instance_server(server_name)
+    assert server is not None
+    received = []
+    instance = single_instance.SingleInstanceServer(server)
+    instance.file_requested.connect(received.append)
+
+    def send_raw(data: bytes) -> None:
+        socket = QtNetwork.QLocalSocket()
+        socket.connectToServer(server_name, QtCore.QIODevice.WriteOnly)
+        assert socket.waitForConnected(500)
+        socket.write(data)
+        socket.flush()
+        socket.waitForBytesWritten(500)
+        socket.disconnectFromServer()
+        socket.waitForDisconnected(100)
+
+    try:
+        send_raw(b"{invalid json")
+        send_raw(b"x" * (single_instance.MAX_SINGLE_INSTANCE_PAYLOAD_BYTES + 1))
+        assert _wait_until(qapp, lambda: not server.hasPendingConnections(), timeout_ms=500)
+        qapp.processEvents()
+        assert received == []
+    finally:
+        server.close()
+        QtNetwork.QLocalServer.removeServer(server_name)

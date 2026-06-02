@@ -6,6 +6,7 @@ from PyQt5 import QtCore, QtNetwork
 from .logger import log_message
 
 SINGLE_INSTANCE_SERVER_NAME = "wagom-player-single-instance-v1"
+MAX_SINGLE_INSTANCE_PAYLOAD_BYTES = 64 * 1024
 
 
 def send_to_existing_instance(
@@ -60,6 +61,7 @@ class SingleInstanceServer(QtCore.QObject):
         super().__init__()
         self._server = server
         self._buffers = {}
+        self._discarded_sockets = set()
         self._server.newConnection.connect(self._on_new_connection)
 
     def _on_new_connection(self) -> None:
@@ -67,6 +69,7 @@ class SingleInstanceServer(QtCore.QObject):
             socket = self._server.nextPendingConnection()
             self._buffers[socket] = bytearray()
             socket.readyRead.connect(lambda s=socket: self._read_socket(s))
+            socket.destroyed.connect(lambda _=None, s=socket: self._cleanup_socket(s))
             socket.disconnected.connect(
                 lambda s=socket: QtCore.QTimer.singleShot(0, lambda: self._finish_socket(s))
             )
@@ -76,11 +79,20 @@ class SingleInstanceServer(QtCore.QObject):
         if socket not in self._buffers:
             return
         self._buffers[socket].extend(bytes(socket.readAll()))
+        if len(self._buffers[socket]) > MAX_SINGLE_INSTANCE_PAYLOAD_BYTES:
+            log_message("Single-instance payload too large; discarding request.")
+            self._discarded_sockets.add(socket)
+            socket.abort()
 
     def _finish_socket(self, socket: QtNetwork.QLocalSocket) -> None:
         self._read_socket(socket)
         data = bytes(self._buffers.pop(socket, b""))
+        discarded = socket in self._discarded_sockets
+        self._discarded_sockets.discard(socket)
         socket.deleteLater()
+
+        if discarded:
+            return
 
         if not data:
             self.file_requested.emit("")
@@ -95,3 +107,7 @@ class SingleInstanceServer(QtCore.QObject):
         file_path = payload.get("file", "")
         if isinstance(file_path, str):
             self.file_requested.emit(file_path)
+
+    def _cleanup_socket(self, socket: QtNetwork.QLocalSocket) -> None:
+        self._buffers.pop(socket, None)
+        self._discarded_sockets.discard(socket)

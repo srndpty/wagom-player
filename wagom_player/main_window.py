@@ -7,9 +7,11 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from . import diagnostics
 from .dialogs import MetadataDialog, ShortcutListDialog
 from .file_actions import (
+    InvalidMoveTargetError,
     TargetFileExistsError,
     move_file_to_subfolder,
     target_path_for_subfolder,
+    validate_move_to_subfolder,
 )
 from .logger import log_message
 from .overlay import OverlayLabel
@@ -36,6 +38,7 @@ from .ui_styles import (
     SEEK_SLIDER_STYLE_WARNING,
     VOLUME_SLIDER_STYLE,
 )
+from .vlc_adapter import VlcPlayerAdapter
 
 try:
     import vlc
@@ -78,6 +81,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # VLC
         self.vlc_instance = _create_vlc_instance()
         self.player: vlc.MediaPlayer = self.vlc_instance.media_player_new()
+        self.vlc_player = VlcPlayerAdapter(self.player)
         self.vlc_events = VlcEvents()
         self._attach_vlc_events()
 
@@ -120,16 +124,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._status_priority_until_msec: int = 0
 
         # 初期音量
-        diagnostics.run_safely(
-            "initial_audio_set_volume",
-            lambda: self.player.audio_set_volume(int(self.volume_slider.value())),
+        self.vlc_player.audio_set_volume(
+            int(self.volume_slider.value()),
+            context="initial_audio_set_volume",
         )
         self._muted: bool = False
-        m = diagnostics.run_safely("initial_audio_get_mute", self.player.audio_get_mute)
+        m = self.vlc_player.audio_get_mute()
         if m in (0, 1):
             self._muted = m == 1
         self._update_volume_label()
-        diagnostics.run_safely("initial_set_rate", lambda: self.player.set_rate(self.playback_rate))
+        self.vlc_player.set_rate(self.playback_rate, context="initial_set_rate")
 
         # ショートカット
         self._setup_shortcuts()
@@ -411,10 +415,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         # ミュート状態は保存しない（常に起動時はミュートOFF）
         self._muted = False
-        diagnostics.run_safely(
-            "load_settings_audio_set_mute",
-            lambda: self.player.audio_set_mute(False),
-        )
+        self.vlc_player.audio_set_mute(False, context="load_settings_audio_set_mute")
         self._update_volume_label()
 
         # ウィンドウ配置
@@ -494,8 +495,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 try:
                     # VLC の状態をログしておくと後で分析しやすい
                     try:
-                        state_before = self.player.get_state()
-                        t_before = self.player.get_time()
+                        state_before = self.vlc_player.get_state()
+                        t_before = self.vlc_player.get_time()
                     except Exception:
                         state_before = None
                         t_before = None
@@ -506,8 +507,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
                     # ★ 同じパスでメディアを作り直す（stop は呼ばない）
                     media = self.vlc_instance.media_new(path)
                     media.parse()
-                    self.player.set_media(media)
-                    self.player.play()
+                    if not self.vlc_player.set_media(
+                        media,
+                        context="restart_current_set_media",
+                        path=path,
+                    ):
+                        return
+                    self.vlc_player.play(context="restart_current_play", path=path)
 
                     # シークバー状態を軽くリセットしておく
                     self._media_length = -1
@@ -518,8 +524,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
                     self.seek_slider.blockSignals(False)
 
                     try:
-                        state_after = self.player.get_state()
-                        t_after = self.player.get_time()
+                        state_after = self.vlc_player.get_state()
+                        t_after = self.vlc_player.get_time()
                     except Exception:
                         state_after = None
                         t_after = None
@@ -609,7 +615,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             try:
                 log_message("play_at(): before player.stop()")
                 diagnostics.record_breadcrumb("play_at_before_player_stop", path=path)
-                self.player.stop()
+                self.vlc_player.stop(context="play_at_player_stop", path=path)
                 log_message("play_at(): after player.stop()")
                 diagnostics.record_breadcrumb("play_at_after_player_stop", path=path)
             except Exception as e:
@@ -626,7 +632,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 log_message("play_at(): after media.parse()")
                 diagnostics.record_breadcrumb("play_at_after_media_parse", path=path)
                 diagnostics.record_breadcrumb("play_at_before_set_media", path=path)
-                self.player.set_media(media)
+                if not self.vlc_player.set_media(media, context="play_at_set_media", path=path):
+                    return
                 diagnostics.record_breadcrumb("play_at_after_set_media", path=path)
             except Exception as e:
                 log_message(f"play_at(): media setup error: {e}")
@@ -635,14 +642,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             self._bind_video_surface()
 
-            diagnostics.run_safely(
-                "play_at_set_rate",
-                lambda: self.player.set_rate(self.playback_rate),
-                path=path,
-            )
+            self.vlc_player.set_rate(self.playback_rate, context="play_at_set_rate", path=path)
 
             diagnostics.record_breadcrumb("play_at_before_player_play", path=path)
-            self.player.play()
+            self.vlc_player.play(context="play_at_player_play", path=path)
             diagnostics.record_breadcrumb("play_at_after_player_play", path=path)
             log_message(
                 f"play_at(): player.play() done, current_index={self.current_index}, path={path}"
@@ -719,7 +722,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
     # ------------- 再生操作 -------------
     def toggle_play(self) -> None:
         """再生/一時停止を切り替える。停止状態からの再開も考慮する。"""
-        player_state = self.player.get_state()
+        player_state = self.vlc_player.get_state()
         diagnostics.record_breadcrumb("toggle_play", player_state=str(player_state))
 
         # プレイヤーが完全に停止または終了している場合
@@ -728,16 +731,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
             if 0 <= self.current_index < len(self.directory_playlist):
                 self.play_at(self.current_index)
         # 再生中または一時停止中の場合
-        elif self.player.is_playing():
-            self.player.pause()
+        elif self.vlc_player.is_playing():
+            self.vlc_player.pause(context="toggle_play_pause")
         else:
-            self.player.play()
+            self.vlc_player.play(context="toggle_play_play")
 
         self._update_play_button()
 
     def stop(self) -> None:
         diagnostics.record_breadcrumb("stop_requested")
-        self.player.stop()
+        self.vlc_player.stop(context="stop_player_stop")
         self.overlay.hide()
         # 停止時にシークバーの色を通常に戻す
         if self._is_seek_bar_warning:
@@ -754,8 +757,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def seek_by(self, delta_ms: int) -> None:
         diagnostics.record_breadcrumb("seek_by", delta_ms=delta_ms)
         try:
-            t = self.player.get_time()
-            length = self.player.get_length()
+            t = self.vlc_player.get_time()
+            length = self.vlc_player.get_length()
             if t == -1 or length <= 0:
                 return
 
@@ -770,7 +773,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             if length > 0:
                 new_t = max(min(new_t, length - 1000), 0)
-            self.player.set_time(new_t)
+            self.vlc_player.set_time(new_t, context="seek_by_set_time", delta_ms=delta_ms)
             self._show_overlay(f"[{self._format_ms(new_t)}]")
         except Exception as e:
             diagnostics.record_exception("seek_by", e, delta_ms=delta_ms)
@@ -887,10 +890,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _release_current_media_for_file_operation(self) -> None:
         log_message("Stopping playback to release file lock...")
         self.stop()
-        try:
-            self.player.set_media(None)
-        except Exception as e:
-            diagnostics.record_exception("move_current_file_clear_media", e)
+        self.vlc_player.set_media(None, context="move_current_file_clear_media")
         QtWidgets.QApplication.processEvents()
 
     def _current_file_path(self) -> str:
@@ -951,8 +951,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         if not self.player:
             self._update_diagnostics_snapshot()
             return
-        cur = self.player.get_time()
-        total = self.player.get_length()
+        cur = self.vlc_player.get_time()
+        total = self.vlc_player.get_length()
 
         if cur >= 0 and total > 0:
             now_msec = QtCore.QDateTime.currentMSecsSinceEpoch()
@@ -989,23 +989,25 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _update_diagnostics_snapshot(self) -> None:
         current_path = self._current_file_path()
         try:
-            player_state = str(self.player.get_state()) if self.player else ""
+            player_state = str(self.vlc_player.get_state("")) if self.player else ""
         except Exception as e:
             player_state = f"error: {e!r}"
         try:
-            player_time = self.player.get_time() if self.player else -1
+            player_time = self.vlc_player.get_time() if self.player else -1
         except Exception:
             player_time = -1
         try:
-            player_length = self.player.get_length() if self.player else -1
+            player_length = self.vlc_player.get_length() if self.player else -1
         except Exception:
             player_length = -1
         try:
-            player_rate = self.player.get_rate() if self.player else self.playback_rate
+            player_rate = (
+                self.vlc_player.get_rate(self.playback_rate) if self.player else self.playback_rate
+            )
         except Exception:
             player_rate = self.playback_rate
         try:
-            playing = bool(self.player.is_playing()) if self.player else False
+            playing = self.vlc_player.is_playing() if self.player else False
         except Exception:
             playing = False
         try:
@@ -1021,6 +1023,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             shuffle_enabled=self.shuffle_enabled,
             repeat_enabled=self.repeat_enabled,
             is_changing_media=getattr(self, "_is_changing_media", False),
+            is_file_operation_in_progress=getattr(self, "_file_operation_in_progress", False),
+            is_ending=getattr(self, "_ending", False),
             is_seeking_user=getattr(self, "_seeking_user", False),
             player_state=player_state,
             player_time=player_time,
@@ -1060,7 +1064,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _update_play_button(self) -> None:
         try:
-            playing = bool(self.player.is_playing())
+            playing = self.vlc_player.is_playing()
         except Exception:
             playing = False
         if (
@@ -1080,34 +1084,27 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._seeking_user = False
         val = self.seek_slider.value()
         diagnostics.record_breadcrumb("seek_released", value=val)
-        try:
-            self.player.set_time(val)
-        except Exception as e:
-            diagnostics.record_exception("seek_released_set_time", e, value=val)
+        self.vlc_player.set_time(val, context="seek_released_set_time")
 
     def _on_slider_moved(self, value: int) -> None:
         diagnostics.record_breadcrumb("slider_moved", value=value)
-        total = self._media_length if self._media_length > 0 else self.player.get_length()
+        total = self._media_length if self._media_length > 0 else self.vlc_player.get_length()
 
         if total > 0:
             self.status.showMessage(f"{self._format_ms(value)} / {self._format_ms(total)}")
 
     def _on_slider_clicked(self, value: int) -> None:
         diagnostics.record_breadcrumb("slider_clicked", value=value)
-        try:
-            self.player.set_time(value)
-        except Exception as e:
-            diagnostics.record_exception("slider_clicked_set_time", e, value=value)
+        self.vlc_player.set_time(value, context="slider_clicked_set_time")
 
     # ------------- 再生速度操作 -------------
     def _change_playback_rate(self, delta: float) -> None:
         new_rate = max(
             self.playback_rate_min, min(self.playback_rate_max, self.playback_rate + delta)
         )
-        try:
-            self.player.set_rate(new_rate)
-        except Exception as e:
-            diagnostics.record_exception("change_playback_rate_set_rate", e, rate=new_rate)
+        if not self.vlc_player.set_rate(new_rate, context="change_playback_rate_set_rate"):
+            self._show_status_message("再生速度の変更に失敗しました", 3000)
+            return
         self.playback_rate = new_rate
         diagnostics.record_breadcrumb("change_playback_rate", rate=new_rate)
         self._show_overlay(f"[再生速度:{new_rate:.1f}倍]")
@@ -1115,10 +1112,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
     # ------------- 音量操作 -------------
     def _on_volume_changed(self, value: int) -> None:
         diagnostics.record_breadcrumb("volume_changed", value=int(value))
-        try:
-            self.player.audio_set_volume(int(value))
-        except Exception as e:
-            diagnostics.record_exception("volume_changed_audio_set_volume", e, value=int(value))
+        self.vlc_player.audio_set_volume(
+            int(value),
+            context="volume_changed_audio_set_volume",
+        )
         self._update_volume_label()
         self._show_overlay(f"[ボリューム:{int(value)}%]")
 
@@ -1183,12 +1180,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_shuffle.setChecked(self.shuffle_enabled)
 
     def _toggle_mute(self) -> None:
-        self._muted = not self._muted
-        diagnostics.record_breadcrumb("toggle_mute", muted=self._muted)
-        try:
-            self.player.audio_toggle_mute()
-        except Exception as e:
-            diagnostics.record_exception("toggle_mute_audio_toggle_mute", e, muted=self._muted)
+        next_muted = not self._muted
+        diagnostics.record_breadcrumb("toggle_mute", muted=next_muted)
+        if self.vlc_player.audio_toggle_mute(context="toggle_mute_audio_toggle_mute"):
+            actual_muted = self.vlc_player.audio_get_mute()
+            self._muted = actual_muted == 1 if actual_muted in (0, 1) else next_muted
+        else:
+            self._show_status_message("ミュート切替に失敗しました", 3000)
         self._update_volume_label()
 
     # ------------- ファイルダイアログ -------------
@@ -1243,12 +1241,28 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 playlist = self._get_current_playlist()
                 next_path = next_path_after_current(playlist, current_file_path)
 
-            # ファイル操作の前に、VLCプレイヤーを完全に停止してファイルロックを解放する
-            self._release_current_media_for_file_operation()
-
-            # --- ファイルパスの準備 (停止後に行っても問題ない) ---
+            # --- ファイルパスの準備 ---
             file_name = os.path.basename(current_file_path)
-            target_file_path = target_path_for_subfolder(current_file_path, subfolder_name)
+            try:
+                target_file_path = validate_move_to_subfolder(current_file_path, subfolder_name)
+            except TargetFileExistsError:
+                target_file_path = target_path_for_subfolder(current_file_path, subfolder_name)
+                log_message(
+                    f"File '{file_name}' already exists in target directory. Skipping move."
+                )
+                self._show_status_message(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
+                diagnostics.record_breadcrumb(
+                    "move_current_file_target_exists", target=target_file_path
+                )
+                return
+            except (FileNotFoundError, InvalidMoveTargetError) as e:
+                log_message(f"Move validation failed: {e}")
+                self._show_status_message(f"移動失敗: {e}", 5000)
+                diagnostics.record_breadcrumb("move_current_file_validation_error", error=str(e))
+                return
+
+            # 検証が通ってから、VLCプレイヤーを完全に停止してファイルロックを解放する。
+            self._release_current_media_for_file_operation()
 
             log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
 

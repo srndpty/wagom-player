@@ -3,9 +3,11 @@ from pathlib import Path
 import pytest
 
 from wagom_player.file_actions import (
+    InvalidMoveTargetError,
     TargetFileExistsError,
     move_file_to_subfolder,
     target_path_for_subfolder,
+    validate_move_to_subfolder,
 )
 
 
@@ -83,3 +85,22 @@ def test_move_file_to_subfolder_reraises_after_retries(tmp_path: Path):
         )
 
     assert source.exists()
+
+
+@pytest.mark.parametrize(
+    "subfolder",
+    ["", ".", "..", "nested/path", r"nested\path", r"C:\target", "/target"],
+)
+def test_validate_move_to_subfolder_rejects_unsafe_subfolder(tmp_path: Path, subfolder: str):
+    source = tmp_path / "movie.mp4"
+    source.write_text("video", encoding="utf-8")
+
+    with pytest.raises(InvalidMoveTargetError):
+        validate_move_to_subfolder(str(source), subfolder)
+
+    assert source.exists()
+
+
+def test_validate_move_to_subfolder_requires_existing_source(tmp_path: Path):
+    with pytest.raises(FileNotFoundError):
+        validate_move_to_subfolder(str(tmp_path / "missing.mp4"), "_ok")

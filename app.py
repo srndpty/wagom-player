@@ -109,14 +109,22 @@ def main_wrapper(argv: list[str]) -> int:
         return 1
 
 
-def main(argv: list[str]) -> int:
-    _configure_runtime_environment()
-
-    # --- 基本的なアプリケーション設定 ---
+def _create_application(argv: list[str]) -> QtWidgets.QApplication:
     app = QtWidgets.QApplication(argv)
     QtCore.QCoreApplication.setOrganizationName("wagom")
     QtCore.QCoreApplication.setApplicationName("wagom-player")
+    return app
 
+
+def _create_player_window(initial_file: Optional[str]) -> VideoPlayer:
+    diagnostics.heartbeat()
+    diagnostics.start_hang_monitor()
+    return VideoPlayer(file=initial_file)
+
+
+def main(argv: list[str]) -> int:
+    _configure_runtime_environment()
+    app = _create_application(argv)
     initial_file = _find_initial_file(argv)
     log_message(f"initial_file={initial_file!r}")
     single_instance_server, forwarded = _claim_single_instance(initial_file)
@@ -127,10 +135,7 @@ def main(argv: list[str]) -> int:
     apply_windows_app_user_model_id("wagom-player")
     icon = apply_app_icon(app)
 
-    # VideoPlayerウィンドウを作成し、単一のファイルパスを渡す
-    diagnostics.heartbeat()
-    diagnostics.start_hang_monitor()
-    player_window = VideoPlayer(file=initial_file)
+    player_window = _create_player_window(initial_file)
     player_window.setWindowIcon(icon)
     if single_instance_server is not None:
         instance_ipc = SingleInstanceServer(single_instance_server)

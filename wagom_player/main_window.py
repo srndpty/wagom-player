@@ -648,7 +648,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 f"play_at(): player.play() done, current_index={self.current_index}, path={path}"
             )
             self._update_window_title(os.path.basename(path))
-            self.status.showMessage(f"再生中: {path}")
+            # 優先メッセージ（移動完了など）の表示中は上書きしない。
+            # 期限が切れれば _update_status_time が再生時間表示へ引き継ぐ。
+            now_msec = QtCore.QDateTime.currentMSecsSinceEpoch()
+            if now_msec >= self._status_priority_until_msec:
+                self.status.showMessage(f"再生中: {path}")
 
             # 新しい動画を再生する際に、シークバーの色を通常に戻す
             if self._is_seek_bar_warning:

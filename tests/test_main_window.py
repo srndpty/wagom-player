@@ -505,6 +505,48 @@ def test_vlc_operation_exceptions_do_not_crash_ui_handlers(player, monkeypatch):
     ]
 
 
+def test_playback_rate_state_updates_only_when_vlc_accepts_change(player):
+    player.playback_rate = 1.0
+    player.player.set_rate = lambda _value: -1
+
+    player._change_playback_rate(0.1)
+
+    assert player.playback_rate == 1.0
+    assert "再生速度の変更に失敗" in player.status.currentMessage()
+
+
+def test_mute_state_updates_only_when_vlc_toggle_succeeds(player):
+    player._muted = False
+    player.player.audio_toggle_mute = lambda: -1
+
+    player._toggle_mute()
+
+    assert not player._muted
+    assert "ミュート切替に失敗" in player.status.currentMessage()
+
+
+def test_vlc_adapter_coerces_invalid_numeric_results(player, monkeypatch):
+    errors = []
+    monkeypatch.setattr(
+        main_window.diagnostics, "record_exception", lambda *args, **kwargs: errors.append(args)
+    )
+    player.player.get_time = lambda: None
+    player.player.get_length = lambda: "bad"
+    player.player.get_rate = lambda: object()
+    player.player.audio_get_mute = lambda: None
+
+    assert player.vlc_player.get_time() == -1
+    assert player.vlc_player.get_length() == -1
+    assert player.vlc_player.get_rate() == 1.0
+    assert player.vlc_player.audio_get_mute() == -1
+    assert [item[0] for item in errors] == [
+        "vlc_get_time_convert",
+        "vlc_get_length_convert",
+        "vlc_get_rate_convert",
+        "vlc_audio_get_mute_convert",
+    ]
+
+
 def test_metadata_dialog_receives_collected_text(player, monkeypatch):
     shown = []
 

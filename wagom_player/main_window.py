@@ -1102,7 +1102,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         new_rate = max(
             self.playback_rate_min, min(self.playback_rate_max, self.playback_rate + delta)
         )
-        self.vlc_player.set_rate(new_rate, context="change_playback_rate_set_rate")
+        if not self.vlc_player.set_rate(new_rate, context="change_playback_rate_set_rate"):
+            self._show_status_message("再生速度の変更に失敗しました", 3000)
+            return
         self.playback_rate = new_rate
         diagnostics.record_breadcrumb("change_playback_rate", rate=new_rate)
         self._show_overlay(f"[再生速度:{new_rate:.1f}倍]")
@@ -1178,9 +1180,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.btn_shuffle.setChecked(self.shuffle_enabled)
 
     def _toggle_mute(self) -> None:
-        self._muted = not self._muted
-        diagnostics.record_breadcrumb("toggle_mute", muted=self._muted)
-        self.vlc_player.audio_toggle_mute(context="toggle_mute_audio_toggle_mute")
+        next_muted = not self._muted
+        diagnostics.record_breadcrumb("toggle_mute", muted=next_muted)
+        if self.vlc_player.audio_toggle_mute(context="toggle_mute_audio_toggle_mute"):
+            actual_muted = self.vlc_player.audio_get_mute()
+            self._muted = actual_muted == 1 if actual_muted in (0, 1) else next_muted
+        else:
+            self._show_status_message("ミュート切替に失敗しました", 3000)
         self._update_volume_label()
 
     # ------------- ファイルダイアログ -------------

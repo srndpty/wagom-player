@@ -69,6 +69,7 @@ class SingleInstanceServer(QtCore.QObject):
             socket = self._server.nextPendingConnection()
             self._buffers[socket] = bytearray()
             socket.readyRead.connect(lambda s=socket: self._read_socket(s))
+            socket.destroyed.connect(lambda _=None, s=socket: self._cleanup_socket(s))
             socket.disconnected.connect(
                 lambda s=socket: QtCore.QTimer.singleShot(0, lambda: self._finish_socket(s))
             )
@@ -106,3 +107,7 @@ class SingleInstanceServer(QtCore.QObject):
         file_path = payload.get("file", "")
         if isinstance(file_path, str):
             self.file_requested.emit(file_path)
+
+    def _cleanup_socket(self, socket: QtNetwork.QLocalSocket) -> None:
+        self._buffers.pop(socket, None)
+        self._discarded_sockets.discard(socket)

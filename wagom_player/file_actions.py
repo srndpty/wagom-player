@@ -1,3 +1,4 @@
+import ntpath
 import os
 import shutil
 import time
@@ -22,6 +23,15 @@ def target_path_for_subfolder(file_path: str, subfolder_name: str) -> str:
 def validate_subfolder_name(subfolder_name: str) -> None:
     if not subfolder_name or subfolder_name in (".", ".."):
         raise InvalidMoveTargetError("subfolder name must be a plain directory name")
+    if "/" in subfolder_name or "\\" in subfolder_name:
+        raise InvalidMoveTargetError("subfolder name must not contain path separators")
+    if (
+        os.path.isabs(subfolder_name)
+        or ntpath.isabs(subfolder_name)
+        or os.path.splitdrive(subfolder_name)[0]
+        or ntpath.splitdrive(subfolder_name)[0]
+    ):
+        raise InvalidMoveTargetError("subfolder name must be relative")
     if os.path.basename(subfolder_name) != subfolder_name:
         raise InvalidMoveTargetError("subfolder name must not contain path separators")
 

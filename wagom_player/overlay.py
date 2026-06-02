@@ -60,4 +60,6 @@ class OverlayLabel:
         )
 
     def resize_to_frame_rect(self) -> None:
-        self.label.setGeometry(self.video_frame.rect())
+        """表示中の overlay のみ video_frame のグローバル位置に追従させる。非表示時は何もしない。"""
+        if self.label.isVisible():
+            self.update_geometry()

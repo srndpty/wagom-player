@@ -4,6 +4,8 @@ from typing import Optional
 
 _session_log_path: Optional[str] = None
 
+_LAST_RUN_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+
 
 def logs_dir() -> str:
     return os.path.join(os.getenv("LOCALAPPDATA", ""), "wagom-player", "logs")
@@ -17,8 +19,19 @@ def configure_session_log(session_id: str) -> None:
             return
         os.makedirs(base, exist_ok=True)
         _session_log_path = os.path.join(base, f"session-{session_id}.txt")
+        _truncate_last_run_if_too_large(base)
     except Exception:
         _session_log_path = None
+
+
+def _truncate_last_run_if_too_large(base: str) -> None:
+    path = os.path.join(base, "last-run.txt")
+    try:
+        if os.path.getsize(path) > _LAST_RUN_MAX_BYTES:
+            with open(path, "w", encoding="utf-8"):
+                pass
+    except OSError:
+        pass
 
 
 def log_message(msg: str) -> None:

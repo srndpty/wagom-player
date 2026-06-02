@@ -274,14 +274,10 @@ def _cleanup_old_files(directory: str, pattern: str, keep: int) -> None:
 
 def _dump_tracebacks() -> str:
     try:
-        with tempfile.TemporaryFile(
-            "w+",
-            encoding="utf-8",
-            errors="ignore",
-        ) as stream:
+        with tempfile.TemporaryFile("w+b") as stream:
             faulthandler.dump_traceback(file=stream, all_threads=True)
             stream.seek(0)
-            return stream.read().rstrip()
+            return stream.read().decode("utf-8", errors="replace").rstrip()
     except Exception:
         stream = io.StringIO()
         stream.write(traceback.format_exc())

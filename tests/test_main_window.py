@@ -502,3 +502,65 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
     )
     player.keyPressEvent(previous_event)
     assert seeks == [player.SEEK_LONG_MS, -player.SEEK_LONG_MS]
+
+
+def test_status_time_does_not_overwrite_priority_message(player):
+    player.directory_playlist = ["a.mp4"]
+    player.current_index = 0
+    player.player.time = 5_000
+    player.player.length = 60_000
+
+    player._show_status_message("移動完了: a.mp4", 5000)
+    msg_after_priority = player.status.currentMessage()
+    assert "移動完了" in msg_after_priority
+
+    player._update_status_time()
+
+    assert player.status.currentMessage() == msg_after_priority
+
+
+def test_media_end_ending_flag_stays_true_until_end_after(player, monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _, cb: scheduled.append(cb),
+    )
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+    player.repeat_enabled = False
+    player.shuffle_enabled = False
+
+    # 1回目: _ending=True のまま timer をスケジュール
+    player._on_media_end()
+    assert player._ending
+    assert len(scheduled) == 1
+
+    # 2回目: _ending=True なので無視される
+    player._on_media_end()
+    assert len(scheduled) == 1
+
+    # timer 発火: _end_after が _ending をリセット
+    play_calls = []
+    monkeypatch.setattr(player, "play_at", play_calls.append)
+    scheduled[0]()
+    assert not player._ending
+    assert play_calls == [1]
+
+
+def test_end_after_resets_ending_even_on_play_at_exception(player, monkeypatch):
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+    player._ending = True
+
+    def raise_error(_):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(player, "play_at", raise_error)
+
+    try:
+        player._end_after(1)
+    except RuntimeError:
+        pass
+
+    assert not player._ending

@@ -422,6 +422,52 @@ def test_move_current_file_updates_playlist_without_real_play(player, tmp_path, 
     assert not player._file_operation_in_progress
 
 
+def test_move_current_file_target_exists_keeps_playlist_and_playback(player, tmp_path):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    player.player.playing = True
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert first.exists()
+    assert player.directory_playlist == [str(first), str(second)]
+    assert player.current_index == 0
+    assert player.player.stopped == 0
+    assert player.player.playing
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_shuffle_uses_remembered_next_path(player, tmp_path, monkeypatch):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    third = tmp_path / "c.mp4"
+    for path in (first, second, third):
+        path.write_text(path.stem, encoding="utf-8")
+    player.directory_playlist = [str(first), str(second), str(third)]
+    player.current_index = 1
+    player.shuffle_enabled = True
+    player.shuffled_playlist = [str(second), str(first), str(third)]
+    calls = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callback(),
+    )
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert player.directory_playlist == [str(first), str(third)]
+    assert calls == [0]
+
+
 def test_media_end_ignored_during_file_operation(player, monkeypatch):
     player.directory_playlist = ["a.mp4", "b.mp4"]
     player.current_index = 0
@@ -432,6 +478,31 @@ def test_media_end_ignored_during_file_operation(player, monkeypatch):
     player._on_media_end()
 
     assert calls == []
+
+
+def test_vlc_operation_exceptions_do_not_crash_ui_handlers(player, monkeypatch):
+    errors = []
+    monkeypatch.setattr(
+        main_window.diagnostics, "record_exception", lambda *args, **kwargs: errors.append(args)
+    )
+
+    player.player.set_time = lambda _value: (_ for _ in ()).throw(RuntimeError("set_time"))
+    player.seek_slider.setValue(10_000)
+    player._on_seek_released()
+    player._on_slider_clicked(20_000)
+
+    player.player.stop = lambda: (_ for _ in ()).throw(RuntimeError("stop"))
+    player.stop()
+
+    player.player.audio_toggle_mute = lambda: (_ for _ in ()).throw(RuntimeError("mute"))
+    player._toggle_mute()
+
+    assert [item[0] for item in errors] == [
+        "seek_released_set_time",
+        "slider_clicked_set_time",
+        "stop_player_stop",
+        "toggle_mute_audio_toggle_mute",
+    ]
 
 
 def test_metadata_dialog_receives_collected_text(player, monkeypatch):

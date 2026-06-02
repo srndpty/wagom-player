@@ -6,6 +6,7 @@ from PyQt5 import QtCore, QtNetwork
 from .logger import log_message
 
 SINGLE_INSTANCE_SERVER_NAME = "wagom-player-single-instance-v1"
+MAX_SINGLE_INSTANCE_PAYLOAD_BYTES = 64 * 1024
 
 
 def send_to_existing_instance(
@@ -60,6 +61,7 @@ class SingleInstanceServer(QtCore.QObject):
         super().__init__()
         self._server = server
         self._buffers = {}
+        self._discarded_sockets = set()
         self._server.newConnection.connect(self._on_new_connection)
 
     def _on_new_connection(self) -> None:
@@ -76,11 +78,20 @@ class SingleInstanceServer(QtCore.QObject):
         if socket not in self._buffers:
             return
         self._buffers[socket].extend(bytes(socket.readAll()))
+        if len(self._buffers[socket]) > MAX_SINGLE_INSTANCE_PAYLOAD_BYTES:
+            log_message("Single-instance payload too large; discarding request.")
+            self._discarded_sockets.add(socket)
+            socket.abort()
 
     def _finish_socket(self, socket: QtNetwork.QLocalSocket) -> None:
         self._read_socket(socket)
         data = bytes(self._buffers.pop(socket, b""))
+        discarded = socket in self._discarded_sockets
+        self._discarded_sockets.discard(socket)
         socket.deleteLater()
+
+        if discarded:
+            return
 
         if not data:
             self.file_requested.emit("")

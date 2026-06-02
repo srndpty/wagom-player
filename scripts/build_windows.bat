@@ -25,11 +25,12 @@ if errorlevel 1 (
   popd >nul & endlocal & exit /b 1
 )
 
-REM Best-effort: terminate running wagom-player to avoid dist lock
-echo [i] Trying to stop running wagom-player.exe (if any)...
-taskkill /F /IM wagom-player.exe >nul 2>nul
-REM Give the OS a moment to release file locks
-timeout /t 1 /nobreak >nul
+REM Do not force-kill the player during builds. A running app can hold dist locks.
+tasklist /FI "IMAGENAME eq wagom-player.exe" 2>nul | findstr /I /C:"wagom-player.exe" >nul
+if not errorlevel 1 (
+  echo [!] wagom-player.exe is running. Close it before building.
+  popd >nul & endlocal & exit /b 1
+)
 
 REM Clean previous dist/build to prevent access denied on overwrite
 if exist dist\wagom-player (

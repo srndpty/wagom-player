@@ -75,7 +75,7 @@ def move_file_to_subfolder(
     subfolder_name: str,
     *,
     retry_delays: tuple[float, ...] = (0.1, 0.25, 0.5),
-    move_func: Callable[[str, str], str] = shutil.move,
+    move_func: Callable[[str, str], object] = shutil.move,
     sleep_func: Callable[[float], None] = time.sleep,
 ) -> str:
     target_file_path = validate_move_to_subfolder(file_path, subfolder_name)
@@ -94,8 +94,9 @@ def move_file_to_path(
     *,
     overwrite: bool = False,
     retry_delays: tuple[float, ...] = (0.1, 0.25, 0.5),
-    move_func: Callable[[str, str], str] = shutil.move,
+    move_func: Callable[[str, str], object] = shutil.move,
     sleep_func: Callable[[float], None] = time.sleep,
+    exists_func: Callable[[str], bool] = os.path.exists,
 ) -> str:
     """明示的なパスへファイルを移動する（別名保存などで利用）。
 
@@ -111,13 +112,12 @@ def move_file_to_path(
         raise InvalidMoveTargetError("target path must include a directory")
     if os.path.abspath(file_path) == os.path.abspath(target_file_path):
         raise InvalidMoveTargetError("source and target paths must be different")
-    if not overwrite and os.path.exists(target_file_path):
-        raise TargetFileExistsError(target_file_path)
-
     os.makedirs(target_dir, exist_ok=True)
 
     attempts = len(retry_delays) + 1
     for attempt in range(attempts):
+        if not overwrite and exists_func(target_file_path):
+            raise TargetFileExistsError(target_file_path)
         try:
             move_func(file_path, target_file_path)
             break
@@ -134,8 +134,9 @@ def move_file_to_subfolder_as_unique(
     *,
     max_collision_retries: int = 5,
     retry_delays: tuple[float, ...] = (0.1, 0.25, 0.5),
-    move_func: Callable[[str, str], str] = shutil.move,
+    move_func: Callable[[str, str], object] = shutil.move,
     sleep_func: Callable[[float], None] = time.sleep,
+    exists_func: Callable[[str], bool] = os.path.exists,
 ) -> str:
     """衝突しない別名を採番してサブフォルダへ移動する。
 
@@ -158,8 +159,10 @@ def move_file_to_subfolder_as_unique(
                 retry_delays=retry_delays,
                 move_func=move_func,
                 sleep_func=sleep_func,
+                exists_func=exists_func,
             )
         except TargetFileExistsError as e:
             # 採番後に誰かが同名を作った -> 別名を採り直して再試行
             last_error = e
-    raise last_error if last_error is not None else TargetFileExistsError(file_path)
+    message = f"unique target collision retry limit exceeded: {file_path}"
+    raise TargetFileExistsError(message) from last_error

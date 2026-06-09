@@ -102,27 +102,33 @@ def test_move_file_to_subfolder_as_unique_picks_free_name(tmp_path: Path):
     assert (target_dir / "movie (1).mp4").read_text(encoding="utf-8") == "source"
 
 
-def test_move_file_to_subfolder_as_unique_recovers_from_collision_race(tmp_path: Path):
+def test_move_file_to_subfolder_as_unique_recovers_when_target_appears_before_move(
+    tmp_path: Path,
+):
     source = tmp_path / "movie.mp4"
     source.write_text("source", encoding="utf-8")
     target_dir = tmp_path / "_ok"
     target_dir.mkdir()
     (target_dir / "movie.mp4").write_text("existing", encoding="utf-8")
-    real_move = []
+    exists_calls = []
 
-    def racy_move(src: str, dst: str) -> None:
-        # 採番直後に誰かが同名を作った状況を最初の1回だけ模す
-        if not real_move:
-            real_move.append(dst)
-            Path(dst).write_text("sneaked-in", encoding="utf-8")
-            raise TargetFileExistsError(dst)
+    def racy_exists(path: str) -> bool:
+        if path.endswith("movie (1).mp4") and path not in exists_calls:
+            exists_calls.append(path)
+            Path(path).write_text("sneaked-in", encoding="utf-8")
+            return True
+        return Path(path).exists()
+
+    def racy_move(src: str, dst: str) -> str:
         Path(src).rename(dst)
+        return dst
 
     result = move_file_to_subfolder_as_unique(
         str(source),
         "_ok",
         move_func=racy_move,
         retry_delays=(),
+        exists_func=racy_exists,
     )
 
     assert result == str(target_dir / "movie (2).mp4")

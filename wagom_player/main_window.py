@@ -455,7 +455,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _attach_vlc_events(self) -> None:
         em = self.player.event_manager()
         em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end)
-        self.vlc_events.media_ended.connect(self._on_media_end)
+        if not getattr(self, "_vlc_events_signal_connected", False):
+            self.vlc_events.media_ended.connect(self._on_media_end)
+            self._vlc_events_signal_connected = True
+
+    def _create_fresh_vlc_player(self) -> None:
+        """現在の VLC player を破棄し、新しい player/adapter に差し替える。"""
+        self.vlc_instance = _create_vlc_instance()
+        self.player = self.vlc_instance.media_player_new()
+        self.vlc_player = VlcPlayerAdapter(self.player)
+        self._attach_vlc_events()
 
     def _on_vlc_end(self, event) -> None:
         log_message(f"_on_vlc_end(): VLC EndReached fired, current_index={self.current_index}")
@@ -902,8 +911,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         """ファイル操作のため再生を止め、メディアを解放する。
 
         解放が完了したら ``True``、タイムアウトで完了を確認できなかった場合は
-        ``False`` を返す。``False`` のときは、遅延したワーカーが後続の再生状態を
-        壊さないよう、呼び出し側はファイル操作・次再生を中止すること。
+        ``False`` を返す。``False`` のときは、呼び出し側はファイル操作・次再生を
+        中止すること。
         """
         log_message("Stopping playback to release file lock...")
         released = self._stop_and_clear_media_without_blocking_ui()
@@ -926,17 +935,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         ``set_media(None)`` は **メインスレッドで、かつ stop 完了後にのみ** 実行する。
         こうすることで、タイムアウト後に遅れて生き残ったワーカーが、後から再生し直した
-        新しいメディアを ``set_media(None)`` で消してしまう事故を防ぐ。
+        新しいメディアを ``set_media(None)`` で消してしまう事故を防ぐ。さらに timeout
+        時は player 自体を差し替え、遅延した ``stop()`` の影響を古い player に閉じ込める。
 
         戻り値は stop 完了を確認できたら ``True``、``timeout_ms`` 以内に完了を確認
         できなければ ``False``。
         """
         done = threading.Event()
+        vlc_player = self.vlc_player
 
         def _worker() -> None:
             # libVLC 呼び出しのみ。Qt オブジェクトには触れないこと。
             try:
-                self.vlc_player.stop(context="move_current_file_stop")
+                vlc_player.stop(context="move_current_file_stop")
             finally:
                 done.set()
 
@@ -951,6 +962,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents, 50)
             if QtCore.QDateTime.currentMSecsSinceEpoch() >= deadline:
                 log_message("[release] VLC stop timed out; aborting file operation")
+                diagnostics.record_breadcrumb("vlc_release_timeout_recreate_player")
+                self._create_fresh_vlc_player()
                 return False
 
         # stop 完了をメインスレッドで確認してから、メインスレッドでメディアを解放する。
@@ -1290,10 +1303,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
         )
         box.setInformativeText("どうしますか？")
         if send2trash is not None:
-            delete_label = "現在のファイルをごみ箱へ移動"
+            delete_button = box.addButton(
+                "現在のファイルをごみ箱へ移動",
+                QtWidgets.QMessageBox.DestructiveRole,
+            )
         else:
-            delete_label = "現在のファイルを完全に削除"
-        delete_button = box.addButton(delete_label, QtWidgets.QMessageBox.DestructiveRole)
+            delete_button = None
+            box.setInformativeText(
+                "ごみ箱機能が利用できないため、現在のファイルは削除できません。"
+            )
         rename_button = box.addButton("別名で移動保存", QtWidgets.QMessageBox.AcceptRole)
         cancel_button = box.addButton("キャンセル", QtWidgets.QMessageBox.RejectRole)
         box.setDefaultButton(cancel_button)
@@ -1302,7 +1320,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         log_message("[DEBUG move] target-exists dialog closed.")
 
         clicked = box.clickedButton()
-        if clicked is delete_button:
+        if delete_button is not None and clicked is delete_button:
             log_message("[DEBUG move] dialog choice = delete")
             return "delete"
         if clicked is rename_button:
@@ -1312,13 +1330,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         return "cancel"
 
     def _discard_current_file(self, file_path: str) -> None:
-        """現在のファイルを破棄する。可能ならごみ箱へ、無ければ完全削除。"""
-        if send2trash is not None:
-            send2trash(file_path)
-            log_message(f"Moved source file to trash: '{file_path}' (target already existed).")
-        else:
-            os.remove(file_path)
-            log_message(f"Deleted source file '{file_path}' (target already existed).")
+        """現在のファイルをごみ箱へ移動する。ごみ箱が使えない場合は削除しない。"""
+        if send2trash is None:
+            raise RuntimeError("ごみ箱機能が利用できないため、削除できません")
+        send2trash(file_path)
+        log_message(f"Moved source file to trash: '{file_path}' (target already existed).")
 
     def _move_current_file_and_play_next(self, subfolder_name: str):
         """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
@@ -1399,8 +1415,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 if collision_resolution == "delete":
                     self._discard_current_file(current_file_path)
                     self._show_status_message(
-                        f"{'ごみ箱へ移動' if send2trash is not None else '削除'}: "
-                        f"{file_name}（移動先に同名ファイルが存在）",
+                        f"ごみ箱へ移動: {file_name}（移動先に同名ファイルが存在）",
                         4000,
                     )
                     diagnostics.record_breadcrumb(

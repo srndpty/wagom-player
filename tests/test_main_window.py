@@ -478,7 +478,7 @@ def test_move_current_file_target_exists_delete_sends_source_to_trash(
     assert not player._file_operation_in_progress
 
 
-def test_move_current_file_target_exists_delete_falls_back_to_remove(
+def test_move_current_file_target_exists_delete_does_not_fall_back_to_remove(
     player, tmp_path, monkeypatch
 ):
     first = tmp_path / "a.mp4"
@@ -489,14 +489,14 @@ def test_move_current_file_target_exists_delete_falls_back_to_remove(
     player.directory_playlist = [str(first)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
-    # send2trash が無い環境を模して完全削除にフォールバックする
+    # send2trash が無い環境では完全削除にフォールバックしない
     monkeypatch.setattr(main_window, "send2trash", None)
 
     player._move_current_file_and_play_next("_ok")
 
-    assert not first.exists()
+    assert first.exists()
     assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
-    assert player.directory_playlist == []
+    assert player.directory_playlist == [str(first)]
     assert not player._file_operation_in_progress
 
 
@@ -527,17 +527,19 @@ def test_move_current_file_release_timeout_aborts_operation(player, tmp_path, mo
 
 def test_stop_and_clear_media_timeout_skips_set_media(player, monkeypatch):
     # stop() がブロックし続ける状況を模し、タイムアウトで False を返すこと、
-    # かつ set_media(None) が呼ばれない（後続再生を壊さない）ことを確認する。
+    # set_media(None) が呼ばれず、player が差し替えられることを確認する。
     block = main_window.threading.Event()
+    old_player = player.player
+    old_vlc_player = player.vlc_player
     set_media_calls = []
 
     def blocking_stop(*args, **kwargs):
         block.wait(2.0)
         return True
 
-    monkeypatch.setattr(player.vlc_player, "stop", blocking_stop)
+    monkeypatch.setattr(old_vlc_player, "stop", blocking_stop)
     monkeypatch.setattr(
-        player.vlc_player,
+        old_vlc_player,
         "set_media",
         lambda *a, **k: set_media_calls.append(a),
     )
@@ -549,6 +551,8 @@ def test_stop_and_clear_media_timeout_skips_set_media(player, monkeypatch):
 
     assert result is False
     assert set_media_calls == []
+    assert player.player is not old_player
+    assert player.vlc_player is not old_vlc_player
 
 
 def test_stop_and_clear_media_success_clears_media(player, monkeypatch):

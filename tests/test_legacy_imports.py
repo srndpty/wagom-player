@@ -1,7 +1,11 @@
 import importlib
 
+import pytest
+
 
 def test_legacy_main_window_import_exports_video_player():
+    pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
+
     legacy = importlib.import_module("wagom_player.main_window")
     modern = importlib.import_module("wagom_player.ui.main_window")
 

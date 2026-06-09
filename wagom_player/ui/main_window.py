@@ -300,10 +300,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _save_settings(self) -> None:
         def _save() -> None:
-            self.settings.setValue("volume", int(self.volume_slider.value()))
-            self.settings.setValue("geometry", self.saveGeometry())
-            self.settings.setValue("isMaximized", self.isMaximized())
-            self.settings.setValue("repeat", bool(self.repeat_enabled))
+            self.settings_store.set_value("volume", int(self.volume_slider.value()))
+            self.settings_store.set_value("geometry", self.saveGeometry())
+            self.settings_store.set_value("isMaximized", self.isMaximized())
+            self.settings_store.set_value("repeat", bool(self.repeat_enabled))
 
         diagnostics.run_safely("save_settings", _save)
 

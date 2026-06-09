@@ -92,7 +92,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.vlc_events = VlcEvents()
         self._vlc_generation = 0
         self._vlc_events_signal_connected = False
-        self._attach_vlc_events()
+        self._attach_vlc_events(self._next_vlc_generation())
 
         self.repeat_enabled: bool = False
         self.shuffle_enabled: bool = False
@@ -454,9 +454,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         super().closeEvent(event)
 
     # --------------- VLC ---------------
-    def _attach_vlc_events(self) -> None:
+    def _next_vlc_generation(self) -> int:
         self._vlc_generation += 1
-        generation = self._vlc_generation
+        return self._vlc_generation
+
+    def _attach_vlc_events(self, generation: int) -> None:
         em = self.player.event_manager()
         em.event_attach(
             vlc.EventType.MediaPlayerEndReached,
@@ -471,8 +473,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.vlc_instance = _create_vlc_instance()
         self.player = self.vlc_instance.media_player_new()
         self.vlc_player = VlcPlayerAdapter(self.player)
-        self._attach_vlc_events()
         self._bind_video_surface()
+        self._attach_vlc_events(self._next_vlc_generation())
 
     def _on_vlc_end_for_generation(self, event, generation: int) -> None:
         if generation != self._vlc_generation:
@@ -983,6 +985,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 diagnostics.record_breadcrumb("vlc_release_timeout_recreate_player")
                 # old player/instance は worker closure が保持する。明示 release は行わず、
                 # 遅延 stop の影響を fresh player への差し替えと generation guard で隔離する。
+                # timeout が多発する環境では、old libVLC object が worker 完了まで残る。
+                log_message(
+                    "[release] stale VLC player may remain until delayed stop finishes"
+                )
                 self._create_fresh_vlc_player()
                 return False
 
@@ -1440,7 +1446,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
                         self._discard_current_file(current_file_path)
                     except Exception as e:
                         log_message(f"Failed to move source to trash: {e}")
-                        self._show_status_message(f"ごみ箱への移動に失敗: {e}", 5000)
+                        self._show_status_message(
+                            f"ごみ箱への移動に失敗: {e}（再生は停止しました）",
+                            5000,
+                        )
                         diagnostics.record_breadcrumb(
                             "move_current_file_trash_error", error=str(e)
                         )

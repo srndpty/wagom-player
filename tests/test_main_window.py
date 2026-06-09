@@ -237,6 +237,18 @@ def test_create_fresh_vlc_player_rebinds_video_surface(player):
     assert len(player.player.events.attached) == 1
 
 
+def test_stale_vlc_event_callback_is_ignored_after_fresh_player(player, monkeypatch):
+    old_callback = player.player.events.attached[0][1]
+    calls = []
+    monkeypatch.setattr(player, "_on_vlc_end", lambda event: calls.append(event))
+
+    player._create_fresh_vlc_player()
+    old_callback("old")
+    player.player.events.attached[0][1]("current")
+
+    assert calls == ["current"]
+
+
 def test_load_file_and_directory_collects_playlist_and_plays(player, tmp_path):
     first = tmp_path / "clip2.mp4"
     second = tmp_path / "clip10.mp4"

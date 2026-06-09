@@ -90,6 +90,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.player: vlc.MediaPlayer = self.vlc_instance.media_player_new()
         self.vlc_player = VlcPlayerAdapter(self.player)
         self.vlc_events = VlcEvents()
+        self._vlc_generation = 0
+        self._vlc_events_signal_connected = False
         self._attach_vlc_events()
 
         self.repeat_enabled: bool = False
@@ -453,9 +455,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # --------------- VLC ---------------
     def _attach_vlc_events(self) -> None:
+        self._vlc_generation += 1
+        generation = self._vlc_generation
         em = self.player.event_manager()
-        em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end)
-        if not getattr(self, "_vlc_events_signal_connected", False):
+        em.event_attach(
+            vlc.EventType.MediaPlayerEndReached,
+            lambda event, gen=generation: self._on_vlc_end_for_generation(event, gen),
+        )
+        if not self._vlc_events_signal_connected:
             self.vlc_events.media_ended.connect(self._on_media_end)
             self._vlc_events_signal_connected = True
 
@@ -465,6 +472,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.player = self.vlc_instance.media_player_new()
         self.vlc_player = VlcPlayerAdapter(self.player)
         self._attach_vlc_events()
+        self._bind_video_surface()
+
+    def _on_vlc_end_for_generation(self, event, generation: int) -> None:
+        if generation != self._vlc_generation:
+            log_message(
+                f"Ignoring stale VLC EndReached event: "
+                f"generation={generation}, current={self._vlc_generation}"
+            )
+            return
+        self._on_vlc_end(event)
 
     def _on_vlc_end(self, event) -> None:
         log_message(f"_on_vlc_end(): VLC EndReached fired, current_index={self.current_index}")
@@ -943,6 +960,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         """
         done = threading.Event()
         vlc_player = self.vlc_player
+        generation = self._vlc_generation
 
         def _worker() -> None:
             # libVLC 呼び出しのみ。Qt オブジェクトには触れないこと。
@@ -963,12 +981,17 @@ class VideoPlayer(QtWidgets.QMainWindow):
             if QtCore.QDateTime.currentMSecsSinceEpoch() >= deadline:
                 log_message("[release] VLC stop timed out; aborting file operation")
                 diagnostics.record_breadcrumb("vlc_release_timeout_recreate_player")
+                # old player/instance は worker closure が保持する。明示 release は行わず、
+                # 遅延 stop の影響を fresh player への差し替えと generation guard で隔離する。
                 self._create_fresh_vlc_player()
                 return False
 
         # stop 完了をメインスレッドで確認してから、メインスレッドでメディアを解放する。
-        self.vlc_player.set_media(None, context="move_current_file_clear_media")
-        log_message("[release] VLC stop finished; media cleared")
+        if self.vlc_player is vlc_player and self._vlc_generation == generation:
+            vlc_player.set_media(None, context="move_current_file_clear_media")
+            log_message("[release] VLC stop finished; media cleared")
+        else:
+            log_message("[release] player changed while releasing; skip clear_media")
         return True
 
     def _current_file_path(self) -> str:
@@ -1413,7 +1436,15 @@ class VideoPlayer(QtWidgets.QMainWindow):
             # --- 移動（または削除）処理 ---
             try:
                 if collision_resolution == "delete":
-                    self._discard_current_file(current_file_path)
+                    try:
+                        self._discard_current_file(current_file_path)
+                    except Exception as e:
+                        log_message(f"Failed to move source to trash: {e}")
+                        self._show_status_message(f"ごみ箱への移動に失敗: {e}", 5000)
+                        diagnostics.record_breadcrumb(
+                            "move_current_file_trash_error", error=str(e)
+                        )
+                        return
                     self._show_status_message(
                         f"ごみ箱へ移動: {file_name}（移動先に同名ファイルが存在）",
                         4000,

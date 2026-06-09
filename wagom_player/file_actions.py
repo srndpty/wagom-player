@@ -9,6 +9,10 @@ class TargetFileExistsError(FileExistsError):
     pass
 
 
+class UniqueTargetRetryLimitExceededError(TargetFileExistsError):
+    pass
+
+
 class InvalidMoveTargetError(ValueError):
     pass
 
@@ -20,14 +24,19 @@ def target_path_for_subfolder(file_path: str, subfolder_name: str) -> str:
     return os.path.join(source_dir, subfolder_name, file_name)
 
 
-def unique_target_path_for_subfolder(file_path: str, subfolder_name: str) -> str:
+def unique_target_path_for_subfolder(
+    file_path: str,
+    subfolder_name: str,
+    *,
+    exists_func: Callable[[str], bool] = os.path.exists,
+) -> str:
     """移動先に同名ファイルがある場合に衝突しない別名のパスを返す。
 
     例: ``movie.mp4`` が既にあれば ``movie (1).mp4`` を試し、それも
     あれば ``movie (2).mp4`` …と空いている名前を探す。
     """
     base_target = target_path_for_subfolder(file_path, subfolder_name)
-    if not os.path.exists(base_target):
+    if not exists_func(base_target):
         return base_target
 
     target_dir = os.path.dirname(base_target)
@@ -35,7 +44,7 @@ def unique_target_path_for_subfolder(file_path: str, subfolder_name: str) -> str
     counter = 1
     while True:
         candidate = os.path.join(target_dir, f"{stem} ({counter}){ext}")
-        if not os.path.exists(candidate):
+        if not exists_func(candidate):
             return candidate
         counter += 1
 
@@ -150,7 +159,11 @@ def move_file_to_subfolder_as_unique(
 
     last_error: TargetFileExistsError | None = None
     for _ in range(max_collision_retries):
-        target_file_path = unique_target_path_for_subfolder(file_path, subfolder_name)
+        target_file_path = unique_target_path_for_subfolder(
+            file_path,
+            subfolder_name,
+            exists_func=exists_func,
+        )
         try:
             return move_file_to_path(
                 file_path,
@@ -165,4 +178,4 @@ def move_file_to_subfolder_as_unique(
             # 採番後に誰かが同名を作った -> 別名を採り直して再試行
             last_error = e
     message = f"unique target collision retry limit exceeded: {file_path}"
-    raise TargetFileExistsError(message) from last_error
+    raise UniqueTargetRetryLimitExceededError(message) from last_error

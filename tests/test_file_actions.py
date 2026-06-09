@@ -113,8 +113,8 @@ def test_move_file_to_subfolder_as_unique_recovers_when_target_appears_before_mo
     exists_calls = []
 
     def racy_exists(path: str) -> bool:
-        if path.endswith("movie (1).mp4") and path not in exists_calls:
-            exists_calls.append(path)
+        exists_calls.append(path)
+        if path.endswith("movie (1).mp4") and exists_calls.count(path) == 2:
             Path(path).write_text("sneaked-in", encoding="utf-8")
             return True
         return Path(path).exists()

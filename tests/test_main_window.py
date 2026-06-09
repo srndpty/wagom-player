@@ -214,9 +214,27 @@ def test_create_vlc_instance_passes_plugin_path(monkeypatch, tmp_path):
 def test_video_player_initializes_ui_and_vlc_events(player):
     assert player.windowTitle() == "wagom-player"
     assert player.volume_slider.value() == 80
-    assert player.player.events.attached == [("ended", player._on_vlc_end)]
+    assert len(player.player.events.attached) == 1
+    assert player.player.events.attached[0][0] == "ended"
     assert player.btn_repeat.isCheckable()
     assert player.btn_shuffle.isCheckable()
+
+
+def test_vlc_end_generation_ignores_stale_events(player, monkeypatch):
+    calls = []
+    monkeypatch.setattr(player, "_on_vlc_end", lambda event: calls.append(event))
+
+    player._on_vlc_end_for_generation("old", player._vlc_generation - 1)
+    player._on_vlc_end_for_generation("current", player._vlc_generation)
+
+    assert calls == ["current"]
+
+
+def test_create_fresh_vlc_player_rebinds_video_surface(player):
+    player._create_fresh_vlc_player()
+
+    assert player.player.surface is not None
+    assert len(player.player.events.attached) == 1
 
 
 def test_load_file_and_directory_collects_playlist_and_plays(player, tmp_path):
@@ -478,6 +496,36 @@ def test_move_current_file_target_exists_delete_sends_source_to_trash(
     assert not player._file_operation_in_progress
 
 
+def test_move_current_file_target_exists_delete_keeps_playlist_when_trash_fails(
+    player, tmp_path, monkeypatch
+):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    monkeypatch.setattr(
+        main_window,
+        "send2trash",
+        lambda path: (_ for _ in ()).throw(RuntimeError("trash failed")),
+    )
+    calls = []
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert first.exists()
+    assert player.directory_playlist == [str(first), str(second)]
+    assert calls == []
+    assert "ごみ箱への移動に失敗" in player.status.currentMessage()
+    assert not player._file_operation_in_progress
+
+
 def test_move_current_file_target_exists_delete_does_not_fall_back_to_remove(
     player, tmp_path, monkeypatch
 ):
@@ -553,6 +601,7 @@ def test_stop_and_clear_media_timeout_skips_set_media(player, monkeypatch):
     assert set_media_calls == []
     assert player.player is not old_player
     assert player.vlc_player is not old_vlc_player
+    assert player.player.surface is not None
 
 
 def test_stop_and_clear_media_success_clears_media(player, monkeypatch):

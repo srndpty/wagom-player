@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -10,6 +11,7 @@ from .file_actions import (
     InvalidMoveTargetError,
     TargetFileExistsError,
     move_file_to_subfolder,
+    move_file_to_subfolder_as_unique,
     target_path_for_subfolder,
     validate_move_to_subfolder,
 )
@@ -44,6 +46,11 @@ try:
     import vlc
 except (FileNotFoundError, ImportError, OSError):
     vlc = None  # type: ignore[assignment]
+
+try:
+    from send2trash import send2trash
+except ImportError:
+    send2trash = None  # type: ignore[assignment]
 
 
 def _create_vlc_instance() -> "vlc.Instance":
@@ -83,7 +90,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.player: vlc.MediaPlayer = self.vlc_instance.media_player_new()
         self.vlc_player = VlcPlayerAdapter(self.player)
         self.vlc_events = VlcEvents()
-        self._attach_vlc_events()
+        self._vlc_generation = 0
+        self._vlc_events_signal_connected = False
+        self._attach_vlc_events(self._next_vlc_generation())
 
         self.repeat_enabled: bool = False
         self.shuffle_enabled: bool = False
@@ -445,10 +454,36 @@ class VideoPlayer(QtWidgets.QMainWindow):
         super().closeEvent(event)
 
     # --------------- VLC ---------------
-    def _attach_vlc_events(self) -> None:
+    def _next_vlc_generation(self) -> int:
+        self._vlc_generation += 1
+        return self._vlc_generation
+
+    def _attach_vlc_events(self, generation: int) -> None:
         em = self.player.event_manager()
-        em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_end)
-        self.vlc_events.media_ended.connect(self._on_media_end)
+        em.event_attach(
+            vlc.EventType.MediaPlayerEndReached,
+            lambda event, gen=generation: self._on_vlc_end_for_generation(event, gen),
+        )
+        if not self._vlc_events_signal_connected:
+            self.vlc_events.media_ended.connect(self._on_media_end)
+            self._vlc_events_signal_connected = True
+
+    def _create_fresh_vlc_player(self) -> None:
+        """現在の VLC player を破棄し、新しい player/adapter に差し替える。"""
+        self.vlc_instance = _create_vlc_instance()
+        self.player = self.vlc_instance.media_player_new()
+        self.vlc_player = VlcPlayerAdapter(self.player)
+        self._bind_video_surface()
+        self._attach_vlc_events(self._next_vlc_generation())
+
+    def _on_vlc_end_for_generation(self, event, generation: int) -> None:
+        if generation != self._vlc_generation:
+            log_message(
+                f"Ignoring stale VLC EndReached event: "
+                f"generation={generation}, current={self._vlc_generation}"
+            )
+            return
+        self._on_vlc_end(event)
 
     def _on_vlc_end(self, event) -> None:
         log_message(f"_on_vlc_end(): VLC EndReached fired, current_index={self.current_index}")
@@ -741,6 +776,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def stop(self) -> None:
         diagnostics.record_breadcrumb("stop_requested")
         self.vlc_player.stop(context="stop_player_stop")
+        self._apply_stopped_ui_state()
+
+    def _apply_stopped_ui_state(self) -> None:
+        """再生停止に伴うUI（オーバーレイ・シークバー・再生ボタン）の更新。"""
         self.overlay.hide()
         # 停止時にシークバーの色を通常に戻す
         if self._is_seek_bar_warning:
@@ -887,11 +926,77 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # Iキーでメタデータ情報表示
         self._sc_metadata = mk(QtCore.Qt.Key_I, self._show_metadata_dialog)
 
-    def _release_current_media_for_file_operation(self) -> None:
+    def _release_current_media_for_file_operation(self) -> bool:
+        """ファイル操作のため再生を止め、メディアを解放する。
+
+        解放が完了したら ``True``、タイムアウトで完了を確認できなかった場合は
+        ``False`` を返す。``False`` のときは、呼び出し側はファイル操作・次再生を
+        中止すること。
+        """
         log_message("Stopping playback to release file lock...")
-        self.stop()
-        self.vlc_player.set_media(None, context="move_current_file_clear_media")
-        QtWidgets.QApplication.processEvents()
+        released = self._stop_and_clear_media_without_blocking_ui()
+        # UI（オーバーレイ・シークバー等）の後始末はメインスレッドで行う
+        self._apply_stopped_ui_state()
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents)
+        return released
+
+    def _stop_and_clear_media_without_blocking_ui(self, timeout_ms: int = 8000) -> bool:
+        """VLC の停止をワーカースレッドで行い、UI を固めずに完了を待つ。
+
+        VLC の同期 ``stop()`` は埋め込みビデオウィンドウの破棄を伴い、その破棄完了を
+        メインスレッドのウィンドウメッセージ処理に依存する。そのままメインスレッドで
+        呼ぶとデッドロック（応答なし）になるため、``stop()`` はワーカースレッドで実行し、
+        メインスレッドはイベントループをポンプし続ける。
+
+        ワーカーから呼ぶのは ``VlcPlayerAdapter.stop()`` だけで、これは純粋な libVLC
+        呼び出し（+ スレッドセーフな diagnostics）のみで Qt の QWidget / signal / UI
+        状態には一切触れない、という前提に依存している。
+
+        ``set_media(None)`` は **メインスレッドで、かつ stop 完了後にのみ** 実行する。
+        こうすることで、タイムアウト後に遅れて生き残ったワーカーが、後から再生し直した
+        新しいメディアを ``set_media(None)`` で消してしまう事故を防ぐ。さらに timeout
+        時は player 自体を差し替え、遅延した ``stop()`` の影響を古い player に閉じ込める。
+
+        戻り値は stop 完了を確認できたら ``True``、``timeout_ms`` 以内に完了を確認
+        できなければ ``False``。
+        """
+        done = threading.Event()
+        vlc_player = self.vlc_player
+        generation = self._vlc_generation
+
+        def _worker() -> None:
+            # libVLC 呼び出しのみ。Qt オブジェクトには触れないこと。
+            try:
+                vlc_player.stop(context="move_current_file_stop")
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=_worker, name="vlc-release", daemon=True)
+        log_message("[release] starting VLC stop on worker thread")
+        thread.start()
+
+        deadline = QtCore.QDateTime.currentMSecsSinceEpoch() + timeout_ms
+        while not done.wait(0):
+            # ExcludeUserInputEvents: VLC が必要とするウィンドウ/描画/タイマー/投函
+            # イベントは処理しつつ、解放中のユーザー操作の再入は抑制する。
+            QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents, 50)
+            if QtCore.QDateTime.currentMSecsSinceEpoch() >= deadline:
+                log_message("[release] VLC stop timed out; aborting file operation")
+                diagnostics.record_breadcrumb("vlc_release_timeout_recreate_player")
+                # old player/instance は worker closure が保持する。明示 release は行わず、
+                # 遅延 stop の影響を fresh player への差し替えと generation guard で隔離する。
+                # timeout が多発する環境では、old libVLC object が worker 完了まで残る。
+                log_message("[release] stale VLC player may remain until delayed stop finishes")
+                self._create_fresh_vlc_player()
+                return False
+
+        # stop 完了をメインスレッドで確認してから、メインスレッドでメディアを解放する。
+        if self.vlc_player is vlc_player and self._vlc_generation == generation:
+            vlc_player.set_media(None, context="move_current_file_clear_media")
+            log_message("[release] VLC stop finished; media cleared")
+        else:
+            log_message("[release] player changed while releasing; skip clear_media")
+        return True
 
     def _current_file_path(self) -> str:
         if 0 <= self.current_index < len(self.directory_playlist):
@@ -1210,6 +1315,51 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self._load_file_and_directory(file)
 
     # ------------- ファイル移動と次の動画再生 -------------
+    def _prompt_target_file_exists(self, file_name: str, subfolder_name: str) -> str:
+        """移動先に同名ファイルがある場合の対応をユーザーに尋ねる。
+
+        戻り値は ``"delete"``（現在のファイルを削除） / ``"rename"``（別名で移動
+        保存） / ``"cancel"``（何もしない）のいずれか。
+        """
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Warning)
+        box.setWindowTitle("移動先に同名ファイルが存在します")
+        box.setText(
+            f"移動先フォルダ '{subfolder_name}' に同名のファイル\n'{file_name}' が既に存在します。"
+        )
+        box.setInformativeText("どうしますか？")
+        if send2trash is not None:
+            delete_button = box.addButton(
+                "現在のファイルをごみ箱へ移動",
+                QtWidgets.QMessageBox.DestructiveRole,
+            )
+        else:
+            delete_button = None
+            box.setInformativeText("ごみ箱機能が利用できないため、現在のファイルは削除できません。")
+        rename_button = box.addButton("別名で移動保存", QtWidgets.QMessageBox.AcceptRole)
+        cancel_button = box.addButton("キャンセル", QtWidgets.QMessageBox.RejectRole)
+        box.setDefaultButton(cancel_button)
+        log_message(f"[DEBUG move] Showing target-exists dialog for '{file_name}'.")
+        box.exec_()
+        log_message("[DEBUG move] target-exists dialog closed.")
+
+        clicked = box.clickedButton()
+        if delete_button is not None and clicked is delete_button:
+            log_message("[DEBUG move] dialog choice = delete")
+            return "delete"
+        if clicked is rename_button:
+            log_message("[DEBUG move] dialog choice = rename")
+            return "rename"
+        log_message("[DEBUG move] dialog choice = cancel")
+        return "cancel"
+
+    def _discard_current_file(self, file_path: str) -> None:
+        """現在のファイルをごみ箱へ移動する。ごみ箱が使えない場合は削除しない。"""
+        if send2trash is None:
+            raise RuntimeError("ごみ箱機能が利用できないため、削除できません")
+        send2trash(file_path)
+        log_message(f"Moved source file to trash: '{file_path}' (target already existed).")
+
     def _move_current_file_and_play_next(self, subfolder_name: str):
         """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
         diagnostics.record_breadcrumb("move_current_file_requested", subfolder=subfolder_name)
@@ -1243,18 +1393,28 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             # --- ファイルパスの準備 ---
             file_name = os.path.basename(current_file_path)
+            # 移動先に同名ファイルがあった場合の解決方法。
+            #   None     : 通常移動
+            #   "rename" : 別名で移動保存
+            #   "delete" : 現在のファイルをごみ箱へ移動（移動はしない）
+            collision_resolution = None
             try:
                 target_file_path = validate_move_to_subfolder(current_file_path, subfolder_name)
             except TargetFileExistsError:
-                target_file_path = target_path_for_subfolder(current_file_path, subfolder_name)
-                log_message(
-                    f"File '{file_name}' already exists in target directory. Skipping move."
-                )
-                self._show_status_message(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
+                existing_target = target_path_for_subfolder(current_file_path, subfolder_name)
+                log_message(f"File '{file_name}' already exists in target directory. Asking user.")
                 diagnostics.record_breadcrumb(
-                    "move_current_file_target_exists", target=target_file_path
+                    "move_current_file_target_exists", target=existing_target
                 )
-                return
+                collision_resolution = self._prompt_target_file_exists(file_name, subfolder_name)
+                diagnostics.record_breadcrumb(
+                    "move_current_file_collision_choice", choice=collision_resolution
+                )
+                target_file_path = None  # 実際の移動先は解決方法に応じて後で決める
+                if collision_resolution not in ("rename", "delete"):  # "cancel"
+                    log_message(f"Move of '{file_name}' cancelled by user (target exists).")
+                    self._show_status_message("移動をキャンセルしました", 4000)
+                    return
             except (FileNotFoundError, InvalidMoveTargetError) as e:
                 log_message(f"Move validation failed: {e}")
                 self._show_status_message(f"移動失敗: {e}", 5000)
@@ -1262,24 +1422,70 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 return
 
             # 検証が通ってから、VLCプレイヤーを完全に停止してファイルロックを解放する。
-            self._release_current_media_for_file_operation()
+            # タイムアウトで解放を確認できなかった場合、遅延ワーカーが後続再生を壊さない
+            # よう、ここで中止する。
+            if not self._release_current_media_for_file_operation():
+                log_message("Media release timed out; aborting file operation.")
+                self._show_status_message(
+                    "移動失敗: 再生中ファイルの解放が完了しませんでした", 5000
+                )
+                diagnostics.record_breadcrumb("move_current_file_release_timeout")
+                return
 
-            log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
-
-            # --- 移動処理 ---
+            # --- 移動（または削除）処理 ---
             try:
-                target_file_path = move_file_to_subfolder(
-                    current_file_path,
-                    subfolder_name,
-                    retry_delays=(0.2, 0.5, 1.0, 2.0),
-                )
-                self._show_status_message(f"移動完了: {file_name} -> {subfolder_name}", 4000)
-                log_message(f"Successfully moved file to '{target_file_path}'")
-                diagnostics.record_breadcrumb(
-                    "move_current_file_success",
-                    source=current_file_path,
-                    target=target_file_path,
-                )
+                if collision_resolution == "delete":
+                    try:
+                        self._discard_current_file(current_file_path)
+                    except Exception as e:
+                        log_message(f"Failed to move source to trash: {e}")
+                        self._show_status_message(
+                            f"ごみ箱への移動に失敗: {e}（再生は停止しました）",
+                            5000,
+                        )
+                        diagnostics.record_breadcrumb("move_current_file_trash_error", error=str(e))
+                        return
+                    self._show_status_message(
+                        f"ごみ箱へ移動: {file_name}（移動先に同名ファイルが存在）",
+                        4000,
+                    )
+                    diagnostics.record_breadcrumb(
+                        "move_current_file_source_discarded", source=current_file_path
+                    )
+                elif collision_resolution == "rename":
+                    log_message(
+                        f"Attempting to move '{file_name}' to '{subfolder_name}' "
+                        "folder under a unique name."
+                    )
+                    target_file_path = move_file_to_subfolder_as_unique(
+                        current_file_path,
+                        subfolder_name,
+                        retry_delays=(0.2, 0.5, 1.0, 2.0),
+                    )
+                    moved_name = os.path.basename(target_file_path)
+                    self._show_status_message(
+                        f"別名で移動完了: {file_name} -> {subfolder_name}/{moved_name}", 4000
+                    )
+                    log_message(f"Successfully moved file to '{target_file_path}'")
+                    diagnostics.record_breadcrumb(
+                        "move_current_file_success",
+                        source=current_file_path,
+                        target=target_file_path,
+                    )
+                else:
+                    log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
+                    target_file_path = move_file_to_subfolder(
+                        current_file_path,
+                        subfolder_name,
+                        retry_delays=(0.2, 0.5, 1.0, 2.0),
+                    )
+                    self._show_status_message(f"移動完了: {file_name} -> {subfolder_name}", 4000)
+                    log_message(f"Successfully moved file to '{target_file_path}'")
+                    diagnostics.record_breadcrumb(
+                        "move_current_file_success",
+                        source=current_file_path,
+                        target=target_file_path,
+                    )
 
             except TargetFileExistsError:
                 log_message(

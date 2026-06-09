@@ -214,9 +214,39 @@ def test_create_vlc_instance_passes_plugin_path(monkeypatch, tmp_path):
 def test_video_player_initializes_ui_and_vlc_events(player):
     assert player.windowTitle() == "wagom-player"
     assert player.volume_slider.value() == 80
-    assert player.player.events.attached == [("ended", player._on_vlc_end)]
+    assert len(player.player.events.attached) == 1
+    assert player.player.events.attached[0][0] == "ended"
     assert player.btn_repeat.isCheckable()
     assert player.btn_shuffle.isCheckable()
+
+
+def test_vlc_end_generation_ignores_stale_events(player, monkeypatch):
+    calls = []
+    monkeypatch.setattr(player, "_on_vlc_end", lambda event: calls.append(event))
+
+    player._on_vlc_end_for_generation("old", player._vlc_generation - 1)
+    player._on_vlc_end_for_generation("current", player._vlc_generation)
+
+    assert calls == ["current"]
+
+
+def test_create_fresh_vlc_player_rebinds_video_surface(player):
+    player._create_fresh_vlc_player()
+
+    assert player.player.surface is not None
+    assert len(player.player.events.attached) == 1
+
+
+def test_stale_vlc_event_callback_is_ignored_after_fresh_player(player, monkeypatch):
+    old_callback = player.player.events.attached[0][1]
+    calls = []
+    monkeypatch.setattr(player, "_on_vlc_end", lambda event: calls.append(event))
+
+    player._create_fresh_vlc_player()
+    old_callback("old")
+    player.player.events.attached[0][1]("current")
+
+    assert calls == ["current"]
 
 
 def test_load_file_and_directory_collects_playlist_and_plays(player, tmp_path):
@@ -422,7 +452,7 @@ def test_move_current_file_updates_playlist_without_real_play(player, tmp_path, 
     assert not player._file_operation_in_progress
 
 
-def test_move_current_file_target_exists_keeps_playlist_and_playback(player, tmp_path):
+def test_move_current_file_target_exists_cancel_keeps_playlist_and_playback(player, tmp_path):
     first = tmp_path / "a.mp4"
     second = tmp_path / "b.mp4"
     first.write_text("a", encoding="utf-8")
@@ -433,6 +463,7 @@ def test_move_current_file_target_exists_keeps_playlist_and_playback(player, tmp
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player.player.playing = True
+    player._prompt_target_file_exists = lambda *args, **kwargs: "cancel"
 
     player._move_current_file_and_play_next("_ok")
 
@@ -441,6 +472,193 @@ def test_move_current_file_target_exists_keeps_playlist_and_playback(player, tmp
     assert player.current_index == 0
     assert player.player.stopped == 0
     assert player.player.playing
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_target_exists_delete_sends_source_to_trash(
+    player, tmp_path, monkeypatch
+):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    # 実際のごみ箱を汚さないよう、send2trash を fake に差し替える
+    trashed = []
+    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
+    calls = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callback(),
+    )
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert trashed == [str(first)]
+    assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
+    assert player.directory_playlist == [str(second)]
+    assert calls == [0]
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_target_exists_delete_keeps_playlist_when_trash_fails(
+    player, tmp_path, monkeypatch
+):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    monkeypatch.setattr(
+        main_window,
+        "send2trash",
+        lambda path: (_ for _ in ()).throw(RuntimeError("trash failed")),
+    )
+    calls = []
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert first.exists()
+    assert player.directory_playlist == [str(first), str(second)]
+    assert calls == []
+    assert "ごみ箱への移動に失敗" in player.status.currentMessage()
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_target_exists_delete_does_not_fall_back_to_remove(
+    player, tmp_path, monkeypatch
+):
+    first = tmp_path / "a.mp4"
+    first.write_text("a", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    # send2trash が無い環境では完全削除にフォールバックしない
+    monkeypatch.setattr(main_window, "send2trash", None)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert first.exists()
+    assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
+    assert player.directory_playlist == [str(first)]
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_release_timeout_aborts_operation(player, tmp_path, monkeypatch):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    # メディア解放がタイムアウトした状況を模す
+    monkeypatch.setattr(player, "_release_current_media_for_file_operation", lambda: False)
+    trashed = []
+    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
+    calls = []
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    # ファイル操作・次再生は一切行われない
+    assert first.exists()
+    assert not (tmp_path / "_ok").exists()
+    assert trashed == []
+    assert player.directory_playlist == [str(first), str(second)]
+    assert calls == []
+    assert not player._file_operation_in_progress
+
+
+def test_stop_and_clear_media_timeout_skips_set_media(player, monkeypatch):
+    # stop() がブロックし続ける状況を模し、タイムアウトで False を返すこと、
+    # set_media(None) が呼ばれず、player が差し替えられることを確認する。
+    block = main_window.threading.Event()
+    old_player = player.player
+    old_vlc_player = player.vlc_player
+    set_media_calls = []
+
+    def blocking_stop(*args, **kwargs):
+        block.wait(2.0)
+        return True
+
+    monkeypatch.setattr(old_vlc_player, "stop", blocking_stop)
+    monkeypatch.setattr(
+        old_vlc_player,
+        "set_media",
+        lambda *a, **k: set_media_calls.append(a),
+    )
+
+    try:
+        result = player._stop_and_clear_media_without_blocking_ui(timeout_ms=80)
+    finally:
+        block.set()
+
+    assert result is False
+    assert set_media_calls == []
+    assert player.player is not old_player
+    assert player.vlc_player is not old_vlc_player
+    assert player.player.surface is not None
+
+
+def test_stop_and_clear_media_success_clears_media(player, monkeypatch):
+    set_media_calls = []
+    monkeypatch.setattr(player.vlc_player, "stop", lambda *a, **k: True)
+    monkeypatch.setattr(
+        player.vlc_player,
+        "set_media",
+        lambda media, **k: set_media_calls.append(media),
+    )
+
+    result = player._stop_and_clear_media_without_blocking_ui(timeout_ms=2000)
+
+    assert result is True
+    assert set_media_calls == [None]
+
+
+def test_move_current_file_target_exists_rename_saves_with_unique_name(
+    player, tmp_path, monkeypatch
+):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("source", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "rename"
+    calls = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callback(),
+    )
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert not first.exists()
+    assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
+    assert (target_dir / "a (1).mp4").read_text(encoding="utf-8") == "source"
+    assert player.directory_playlist == [str(second)]
+    assert calls == [0]
     assert not player._file_operation_in_progress
 
 

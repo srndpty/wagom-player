@@ -422,7 +422,7 @@ def test_move_current_file_updates_playlist_without_real_play(player, tmp_path, 
     assert not player._file_operation_in_progress
 
 
-def test_move_current_file_target_exists_keeps_playlist_and_playback(player, tmp_path):
+def test_move_current_file_target_exists_cancel_keeps_playlist_and_playback(player, tmp_path):
     first = tmp_path / "a.mp4"
     second = tmp_path / "b.mp4"
     first.write_text("a", encoding="utf-8")
@@ -433,6 +433,7 @@ def test_move_current_file_target_exists_keeps_playlist_and_playback(player, tmp
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player.player.playing = True
+    player._prompt_target_file_exists = lambda *args, **kwargs: "cancel"
 
     player._move_current_file_and_play_next("_ok")
 
@@ -441,6 +442,65 @@ def test_move_current_file_target_exists_keeps_playlist_and_playback(player, tmp
     assert player.current_index == 0
     assert player.player.stopped == 0
     assert player.player.playing
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_target_exists_delete_removes_source(player, tmp_path, monkeypatch):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    calls = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callback(),
+    )
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert not first.exists()
+    assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
+    assert player.directory_playlist == [str(second)]
+    assert calls == [0]
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_target_exists_rename_saves_with_unique_name(
+    player, tmp_path, monkeypatch
+):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("source", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "rename"
+    calls = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callback(),
+    )
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert not first.exists()
+    assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
+    assert (target_dir / "a (1).mp4").read_text(encoding="utf-8") == "source"
+    assert player.directory_playlist == [str(second)]
+    assert calls == [0]
     assert not player._file_operation_in_progress
 
 

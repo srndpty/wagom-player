@@ -20,6 +20,26 @@ def target_path_for_subfolder(file_path: str, subfolder_name: str) -> str:
     return os.path.join(source_dir, subfolder_name, file_name)
 
 
+def unique_target_path_for_subfolder(file_path: str, subfolder_name: str) -> str:
+    """移動先に同名ファイルがある場合に衝突しない別名のパスを返す。
+
+    例: ``movie.mp4`` が既にあれば ``movie (1).mp4`` を試し、それも
+    あれば ``movie (2).mp4`` …と空いている名前を探す。
+    """
+    base_target = target_path_for_subfolder(file_path, subfolder_name)
+    if not os.path.exists(base_target):
+        return base_target
+
+    target_dir = os.path.dirname(base_target)
+    stem, ext = os.path.splitext(os.path.basename(base_target))
+    counter = 1
+    while True:
+        candidate = os.path.join(target_dir, f"{stem} ({counter}){ext}")
+        if not os.path.exists(candidate):
+            return candidate
+        counter += 1
+
+
 def validate_subfolder_name(subfolder_name: str) -> None:
     if not subfolder_name or subfolder_name in (".", ".."):
         raise InvalidMoveTargetError("subfolder name must be a plain directory name")
@@ -59,6 +79,24 @@ def move_file_to_subfolder(
     sleep_func: Callable[[float], None] = time.sleep,
 ) -> str:
     target_file_path = validate_move_to_subfolder(file_path, subfolder_name)
+    return move_file_to_path(
+        file_path,
+        target_file_path,
+        retry_delays=retry_delays,
+        move_func=move_func,
+        sleep_func=sleep_func,
+    )
+
+
+def move_file_to_path(
+    file_path: str,
+    target_file_path: str,
+    *,
+    retry_delays: tuple[float, ...] = (0.1, 0.25, 0.5),
+    move_func: Callable[[str, str], str] = shutil.move,
+    sleep_func: Callable[[float], None] = time.sleep,
+) -> str:
+    """検証済みの明示的なパスへファイルを移動する（別名保存などで利用）。"""
     os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
 
     attempts = len(retry_delays) + 1

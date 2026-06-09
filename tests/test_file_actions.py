@@ -5,8 +5,10 @@ import pytest
 from wagom_player.file_actions import (
     InvalidMoveTargetError,
     TargetFileExistsError,
+    move_file_to_path,
     move_file_to_subfolder,
     target_path_for_subfolder,
+    unique_target_path_for_subfolder,
     validate_move_to_subfolder,
 )
 
@@ -15,6 +17,38 @@ def test_target_path_for_subfolder_keeps_filename(tmp_path: Path):
     source = tmp_path / "movie.mp4"
 
     assert target_path_for_subfolder(str(source), "_ok") == str(tmp_path / "_ok" / "movie.mp4")
+
+
+def test_unique_target_path_returns_base_when_free(tmp_path: Path):
+    source = tmp_path / "movie.mp4"
+
+    assert unique_target_path_for_subfolder(str(source), "_ok") == str(
+        tmp_path / "_ok" / "movie.mp4"
+    )
+
+
+def test_unique_target_path_avoids_existing_names(tmp_path: Path):
+    source = tmp_path / "movie.mp4"
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "movie.mp4").write_text("a", encoding="utf-8")
+    (target_dir / "movie (1).mp4").write_text("b", encoding="utf-8")
+
+    assert unique_target_path_for_subfolder(str(source), "_ok") == str(
+        target_dir / "movie (2).mp4"
+    )
+
+
+def test_move_file_to_path_moves_to_explicit_target(tmp_path: Path):
+    source = tmp_path / "movie.mp4"
+    source.write_text("video", encoding="utf-8")
+    target = tmp_path / "_ok" / "renamed.mp4"
+
+    result = move_file_to_path(str(source), str(target))
+
+    assert result == str(target)
+    assert not source.exists()
+    assert target.read_text(encoding="utf-8") == "video"
 
 
 def test_move_file_to_subfolder_moves_file(tmp_path: Path):

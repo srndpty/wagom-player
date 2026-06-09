@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -9,8 +10,10 @@ from .dialogs import MetadataDialog, ShortcutListDialog
 from .file_actions import (
     InvalidMoveTargetError,
     TargetFileExistsError,
+    move_file_to_path,
     move_file_to_subfolder,
     target_path_for_subfolder,
+    unique_target_path_for_subfolder,
     validate_move_to_subfolder,
 )
 from .logger import log_message
@@ -741,6 +744,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def stop(self) -> None:
         diagnostics.record_breadcrumb("stop_requested")
         self.vlc_player.stop(context="stop_player_stop")
+        self._apply_stopped_ui_state()
+
+    def _apply_stopped_ui_state(self) -> None:
+        """再生停止に伴うUI（オーバーレイ・シークバー・再生ボタン）の更新。"""
         self.overlay.hide()
         # 停止時にシークバーの色を通常に戻す
         if self._is_seek_bar_warning:
@@ -889,9 +896,46 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _release_current_media_for_file_operation(self) -> None:
         log_message("Stopping playback to release file lock...")
-        self.stop()
-        self.vlc_player.set_media(None, context="move_current_file_clear_media")
+        # VLC の stop() / set_media(None) は埋め込みビデオウィンドウの破棄を伴い、
+        # その破棄完了をメインスレッドのウィンドウメッセージ処理に依存する。
+        # そのままメインスレッドで同期呼び出しするとデッドロック（応答なし）になるため、
+        # ワーカースレッドで実行し、メインスレッドはイベントループを回し続ける。
+        self._stop_and_clear_media_without_blocking_ui()
+        # UI（オーバーレイ・シークバー等）の後始末はメインスレッドで行う
+        self._apply_stopped_ui_state()
         QtWidgets.QApplication.processEvents()
+
+    def _stop_and_clear_media_without_blocking_ui(self, timeout_ms: int = 8000) -> None:
+        """VLC の停止とメディア解放をワーカースレッドで行い、UIを固めずに待機する。
+
+        メインスレッドではイベントループをポンプし続けることで、VLC のビデオ出力
+        破棄がウィンドウメッセージを処理できるようにしてデッドロックを防ぐ。
+        ``timeout_ms`` を過ぎても完了しない場合は、UI を凍結させないために待機を
+        打ち切って処理を継続する（最悪でもファイルロックが残るだけで応答は維持）。
+        """
+        done = threading.Event()
+
+        def _worker() -> None:
+            try:
+                self.vlc_player.stop(context="move_current_file_stop")
+                self.vlc_player.set_media(None, context="move_current_file_clear_media")
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=_worker, name="vlc-release", daemon=True)
+        log_message("[DEBUG move] release: starting VLC stop/clear on worker thread")
+        thread.start()
+
+        deadline = QtCore.QDateTime.currentMSecsSinceEpoch() + timeout_ms
+        while not done.wait(0):
+            QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 50)
+            if QtCore.QDateTime.currentMSecsSinceEpoch() >= deadline:
+                log_message(
+                    "[DEBUG move] release: VLC stop/clear timed out; "
+                    "continuing without waiting"
+                )
+                return
+        log_message("[DEBUG move] release: VLC stop/clear worker finished")
 
     def _current_file_path(self) -> str:
         if 0 <= self.current_index < len(self.directory_playlist):
@@ -1210,6 +1254,40 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self._load_file_and_directory(file)
 
     # ------------- ファイル移動と次の動画再生 -------------
+    def _prompt_target_file_exists(self, file_name: str, subfolder_name: str) -> str:
+        """移動先に同名ファイルがある場合の対応をユーザーに尋ねる。
+
+        戻り値は ``"delete"``（現在のファイルを削除） / ``"rename"``（別名で移動
+        保存） / ``"cancel"``（何もしない）のいずれか。
+        """
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Warning)
+        box.setWindowTitle("移動先に同名ファイルが存在します")
+        box.setText(
+            f"移動先フォルダ '{subfolder_name}' に同名のファイル\n"
+            f"'{file_name}' が既に存在します。"
+        )
+        box.setInformativeText("どうしますか？")
+        delete_button = box.addButton(
+            "現在のファイルを削除", QtWidgets.QMessageBox.DestructiveRole
+        )
+        rename_button = box.addButton("別名で移動保存", QtWidgets.QMessageBox.AcceptRole)
+        cancel_button = box.addButton("キャンセル", QtWidgets.QMessageBox.RejectRole)
+        box.setDefaultButton(cancel_button)
+        log_message(f"[DEBUG move] Showing target-exists dialog for '{file_name}'.")
+        box.exec_()
+        log_message("[DEBUG move] target-exists dialog closed.")
+
+        clicked = box.clickedButton()
+        if clicked is delete_button:
+            log_message("[DEBUG move] dialog choice = delete")
+            return "delete"
+        if clicked is rename_button:
+            log_message("[DEBUG move] dialog choice = rename")
+            return "rename"
+        log_message("[DEBUG move] dialog choice = cancel")
+        return "cancel"
+
     def _move_current_file_and_play_next(self, subfolder_name: str):
         """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
         diagnostics.record_breadcrumb("move_current_file_requested", subfolder=subfolder_name)
@@ -1243,18 +1321,37 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             # --- ファイルパスの準備 ---
             file_name = os.path.basename(current_file_path)
+            # 移動先に同名ファイルがあった場合の解決方法。
+            #   None     : 通常移動
+            #   "rename" : 別名で移動保存
+            #   "delete" : 現在のファイルを削除（移動はしない）
+            collision_resolution = None
+            forced_target_path = None
             try:
                 target_file_path = validate_move_to_subfolder(current_file_path, subfolder_name)
             except TargetFileExistsError:
-                target_file_path = target_path_for_subfolder(current_file_path, subfolder_name)
+                existing_target = target_path_for_subfolder(current_file_path, subfolder_name)
                 log_message(
-                    f"File '{file_name}' already exists in target directory. Skipping move."
+                    f"File '{file_name}' already exists in target directory. Asking user."
                 )
-                self._show_status_message(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
                 diagnostics.record_breadcrumb(
-                    "move_current_file_target_exists", target=target_file_path
+                    "move_current_file_target_exists", target=existing_target
                 )
-                return
+                collision_resolution = self._prompt_target_file_exists(file_name, subfolder_name)
+                diagnostics.record_breadcrumb(
+                    "move_current_file_collision_choice", choice=collision_resolution
+                )
+                if collision_resolution == "rename":
+                    forced_target_path = unique_target_path_for_subfolder(
+                        current_file_path, subfolder_name
+                    )
+                    target_file_path = forced_target_path
+                elif collision_resolution == "delete":
+                    target_file_path = None
+                else:  # "cancel"
+                    log_message(f"Move of '{file_name}' cancelled by user (target exists).")
+                    self._show_status_message("移動をキャンセルしました", 4000)
+                    return
             except (FileNotFoundError, InvalidMoveTargetError) as e:
                 log_message(f"Move validation failed: {e}")
                 self._show_status_message(f"移動失敗: {e}", 5000)
@@ -1264,22 +1361,53 @@ class VideoPlayer(QtWidgets.QMainWindow):
             # 検証が通ってから、VLCプレイヤーを完全に停止してファイルロックを解放する。
             self._release_current_media_for_file_operation()
 
-            log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
-
-            # --- 移動処理 ---
+            # --- 移動（または削除）処理 ---
             try:
-                target_file_path = move_file_to_subfolder(
-                    current_file_path,
-                    subfolder_name,
-                    retry_delays=(0.2, 0.5, 1.0, 2.0),
-                )
-                self._show_status_message(f"移動完了: {file_name} -> {subfolder_name}", 4000)
-                log_message(f"Successfully moved file to '{target_file_path}'")
-                diagnostics.record_breadcrumb(
-                    "move_current_file_success",
-                    source=current_file_path,
-                    target=target_file_path,
-                )
+                if collision_resolution == "delete":
+                    os.remove(current_file_path)
+                    self._show_status_message(
+                        f"削除完了: {file_name}（移動先に同名ファイルが存在）", 4000
+                    )
+                    log_message(
+                        f"Deleted source file '{current_file_path}' (target already existed)."
+                    )
+                    diagnostics.record_breadcrumb(
+                        "move_current_file_source_deleted", source=current_file_path
+                    )
+                elif collision_resolution == "rename":
+                    log_message(
+                        f"Attempting to move '{file_name}' to '{subfolder_name}' folder "
+                        f"as '{os.path.basename(forced_target_path)}'."
+                    )
+                    target_file_path = move_file_to_path(
+                        current_file_path,
+                        forced_target_path,
+                        retry_delays=(0.2, 0.5, 1.0, 2.0),
+                    )
+                    moved_name = os.path.basename(target_file_path)
+                    self._show_status_message(
+                        f"別名で移動完了: {file_name} -> {subfolder_name}/{moved_name}", 4000
+                    )
+                    log_message(f"Successfully moved file to '{target_file_path}'")
+                    diagnostics.record_breadcrumb(
+                        "move_current_file_success",
+                        source=current_file_path,
+                        target=target_file_path,
+                    )
+                else:
+                    log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
+                    target_file_path = move_file_to_subfolder(
+                        current_file_path,
+                        subfolder_name,
+                        retry_delays=(0.2, 0.5, 1.0, 2.0),
+                    )
+                    self._show_status_message(f"移動完了: {file_name} -> {subfolder_name}", 4000)
+                    log_message(f"Successfully moved file to '{target_file_path}'")
+                    diagnostics.record_breadcrumb(
+                        "move_current_file_success",
+                        source=current_file_path,
+                        target=target_file_path,
+                    )
 
             except TargetFileExistsError:
                 log_message(

@@ -445,7 +445,9 @@ def test_move_current_file_target_exists_cancel_keeps_playlist_and_playback(play
     assert not player._file_operation_in_progress
 
 
-def test_move_current_file_target_exists_delete_removes_source(player, tmp_path, monkeypatch):
+def test_move_current_file_target_exists_delete_sends_source_to_trash(
+    player, tmp_path, monkeypatch
+):
     first = tmp_path / "a.mp4"
     second = tmp_path / "b.mp4"
     first.write_text("a", encoding="utf-8")
@@ -456,6 +458,9 @@ def test_move_current_file_target_exists_delete_removes_source(player, tmp_path,
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    # 実際のごみ箱を汚さないよう、send2trash を fake に差し替える
+    trashed = []
+    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
     calls = []
     monkeypatch.setattr(
         main_window.QtCore.QTimer,
@@ -466,11 +471,99 @@ def test_move_current_file_target_exists_delete_removes_source(player, tmp_path,
 
     player._move_current_file_and_play_next("_ok")
 
-    assert not first.exists()
+    assert trashed == [str(first)]
     assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
     assert player.directory_playlist == [str(second)]
     assert calls == [0]
     assert not player._file_operation_in_progress
+
+
+def test_move_current_file_target_exists_delete_falls_back_to_remove(
+    player, tmp_path, monkeypatch
+):
+    first = tmp_path / "a.mp4"
+    first.write_text("a", encoding="utf-8")
+    target_dir = tmp_path / "_ok"
+    target_dir.mkdir()
+    (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
+    player.directory_playlist = [str(first)]
+    player.current_index = 0
+    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    # send2trash が無い環境を模して完全削除にフォールバックする
+    monkeypatch.setattr(main_window, "send2trash", None)
+
+    player._move_current_file_and_play_next("_ok")
+
+    assert not first.exists()
+    assert (target_dir / "a.mp4").read_text(encoding="utf-8") == "existing"
+    assert player.directory_playlist == []
+    assert not player._file_operation_in_progress
+
+
+def test_move_current_file_release_timeout_aborts_operation(player, tmp_path, monkeypatch):
+    first = tmp_path / "a.mp4"
+    second = tmp_path / "b.mp4"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    player.directory_playlist = [str(first), str(second)]
+    player.current_index = 0
+    # メディア解放がタイムアウトした状況を模す
+    monkeypatch.setattr(player, "_release_current_media_for_file_operation", lambda: False)
+    trashed = []
+    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
+    calls = []
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player._move_current_file_and_play_next("_ok")
+
+    # ファイル操作・次再生は一切行われない
+    assert first.exists()
+    assert not (tmp_path / "_ok").exists()
+    assert trashed == []
+    assert player.directory_playlist == [str(first), str(second)]
+    assert calls == []
+    assert not player._file_operation_in_progress
+
+
+def test_stop_and_clear_media_timeout_skips_set_media(player, monkeypatch):
+    # stop() がブロックし続ける状況を模し、タイムアウトで False を返すこと、
+    # かつ set_media(None) が呼ばれない（後続再生を壊さない）ことを確認する。
+    block = main_window.threading.Event()
+    set_media_calls = []
+
+    def blocking_stop(*args, **kwargs):
+        block.wait(2.0)
+        return True
+
+    monkeypatch.setattr(player.vlc_player, "stop", blocking_stop)
+    monkeypatch.setattr(
+        player.vlc_player,
+        "set_media",
+        lambda *a, **k: set_media_calls.append(a),
+    )
+
+    try:
+        result = player._stop_and_clear_media_without_blocking_ui(timeout_ms=80)
+    finally:
+        block.set()
+
+    assert result is False
+    assert set_media_calls == []
+
+
+def test_stop_and_clear_media_success_clears_media(player, monkeypatch):
+    set_media_calls = []
+    monkeypatch.setattr(player.vlc_player, "stop", lambda *a, **k: True)
+    monkeypatch.setattr(
+        player.vlc_player,
+        "set_media",
+        lambda media, **k: set_media_calls.append(media),
+    )
+
+    result = player._stop_and_clear_media_without_blocking_ui(timeout_ms=2000)
+
+    assert result is True
+    assert set_media_calls == [None]
 
 
 def test_move_current_file_target_exists_rename_saves_with_unique_name(

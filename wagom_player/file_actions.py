@@ -92,12 +92,29 @@ def move_file_to_path(
     file_path: str,
     target_file_path: str,
     *,
+    overwrite: bool = False,
     retry_delays: tuple[float, ...] = (0.1, 0.25, 0.5),
     move_func: Callable[[str, str], str] = shutil.move,
     sleep_func: Callable[[float], None] = time.sleep,
 ) -> str:
-    """検証済みの明示的なパスへファイルを移動する（別名保存などで利用）。"""
-    os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
+    """明示的なパスへファイルを移動する（別名保存などで利用）。
+
+    汎用ユーティリティとして誤用されないよう、移動直前にも最低限の検証を行う:
+    source が実在すること、target がディレクトリを含む有効なパスであること、
+    そして ``overwrite=False`` の場合は target が未存在であること（移動直前の
+    再確認で TOCTOU 窓を狭める）。
+    """
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(file_path)
+    target_dir = os.path.dirname(target_file_path)
+    if not target_dir:
+        raise InvalidMoveTargetError("target path must include a directory")
+    if os.path.abspath(file_path) == os.path.abspath(target_file_path):
+        raise InvalidMoveTargetError("source and target paths must be different")
+    if not overwrite and os.path.exists(target_file_path):
+        raise TargetFileExistsError(target_file_path)
+
+    os.makedirs(target_dir, exist_ok=True)
 
     attempts = len(retry_delays) + 1
     for attempt in range(attempts):
@@ -109,3 +126,40 @@ def move_file_to_path(
                 raise
             sleep_func(retry_delays[attempt])
     return target_file_path
+
+
+def move_file_to_subfolder_as_unique(
+    file_path: str,
+    subfolder_name: str,
+    *,
+    max_collision_retries: int = 5,
+    retry_delays: tuple[float, ...] = (0.1, 0.25, 0.5),
+    move_func: Callable[[str, str], str] = shutil.move,
+    sleep_func: Callable[[float], None] = time.sleep,
+) -> str:
+    """衝突しない別名を採番してサブフォルダへ移動する。
+
+    採番（``unique_target_path_for_subfolder``）と実際の移動の間に同名パスが
+    作られる TOCTOU を考慮し、移動直前の存在チェックで衝突を検知したら採番から
+    やり直す。
+    """
+    validate_subfolder_name(subfolder_name)
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(file_path)
+
+    last_error: TargetFileExistsError | None = None
+    for _ in range(max_collision_retries):
+        target_file_path = unique_target_path_for_subfolder(file_path, subfolder_name)
+        try:
+            return move_file_to_path(
+                file_path,
+                target_file_path,
+                overwrite=False,
+                retry_delays=retry_delays,
+                move_func=move_func,
+                sleep_func=sleep_func,
+            )
+        except TargetFileExistsError as e:
+            # 採番後に誰かが同名を作った -> 別名を採り直して再試行
+            last_error = e
+    raise last_error if last_error is not None else TargetFileExistsError(file_path)

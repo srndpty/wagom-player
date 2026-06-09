@@ -4,6 +4,7 @@ import os
 import pytest
 
 from tests.fakes.vlc import FakeVlc
+from wagom_player.infrastructure.trash import TrashService
 
 QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
@@ -320,9 +321,9 @@ def test_move_current_file_target_exists_delete_sends_source_to_trash(
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
-    # 実際のごみ箱を汚さないよう、send2trash を fake に差し替える
+    # 実際のごみ箱を汚さないよう、TrashService を fake に差し替える
     trashed = []
-    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
+    player.trash_service = TrashService(lambda path: trashed.append(path))
     calls = []
     monkeypatch.setattr(
         main_window.QtCore.QTimer,
@@ -353,10 +354,8 @@ def test_move_current_file_target_exists_delete_keeps_playlist_when_trash_fails(
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
-    monkeypatch.setattr(
-        main_window,
-        "send2trash",
-        lambda path: (_ for _ in ()).throw(RuntimeError("trash failed")),
+    player.trash_service = TrashService(
+        lambda path: (_ for _ in ()).throw(RuntimeError("trash failed"))
     )
     calls = []
     monkeypatch.setattr(player, "play_at", calls.append)
@@ -381,8 +380,8 @@ def test_move_current_file_target_exists_delete_does_not_fall_back_to_remove(
     player.directory_playlist = [str(first)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
-    # send2trash が無い環境では完全削除にフォールバックしない
-    monkeypatch.setattr(main_window, "send2trash", None)
+    # ごみ箱が無い環境では完全削除にフォールバックしない
+    player.trash_service = TrashService(None)
 
     player._move_current_file_and_play_next("_ok")
 
@@ -402,7 +401,7 @@ def test_move_current_file_release_timeout_aborts_operation(player, tmp_path, mo
     # メディア解放がタイムアウトした状況を模す
     monkeypatch.setattr(player, "_release_current_media_for_file_operation", lambda: False)
     trashed = []
-    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
+    player.trash_service = TrashService(lambda path: trashed.append(path))
     calls = []
     monkeypatch.setattr(player, "play_at", calls.append)
 

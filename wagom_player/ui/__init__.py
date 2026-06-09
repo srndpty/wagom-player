@@ -1,3 +1,1 @@
-from .main_window import VideoPlayer
-
-__all__ = ["VideoPlayer"]
+__all__ = ["main_window", "player_view", "shortcut_binder"]

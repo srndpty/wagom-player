@@ -5,6 +5,7 @@ from ..domain.playlist import (
     adjacent_index,
     create_shuffled_playlist,
     next_index_after_removal,
+    next_path,
 )
 
 
@@ -47,3 +48,6 @@ class PlaylistController:
             shuffle_enabled,
             remembered_next_path,
         )
+
+    def next_path(self, active: Sequence[str], current_path: str) -> str | None:
+        return next_path(active, current_path)

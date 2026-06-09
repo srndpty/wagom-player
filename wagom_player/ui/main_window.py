@@ -14,6 +14,7 @@ from ..application.file_actions import (
     target_path_for_subfolder,
     validate_move_to_subfolder,
 )
+from ..application.playlist_controller import PlaylistController
 from ..dialogs import MetadataDialog, ShortcutListDialog
 from ..domain.formatting import format_ms
 from ..domain.window_title import build_window_title
@@ -29,15 +30,6 @@ from ..playlist import (
 )
 from ..playlist import _create_windows_logical_key as _create_windows_logical_key
 from ..playlist import natural_key as natural_key
-from ..playlist_state import (
-    active_playlist,
-    adjacent_index,
-    create_shuffled_playlist,
-    next_index_after_removal,
-)
-from ..playlist_state import (
-    next_path as next_path_after_current,
-)
 from ..shortcuts import SHORTCUT_ROWS
 from ..ui_styles import (
     SEEK_SLIDER_STYLE_NORMAL,
@@ -76,6 +68,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.resize(960, 540)
         self.settings_store = SettingsStore(QtCore.QSettings())
         self.settings = self.settings_store.settings
+        self.playlist_controller = PlaylistController()
+        self.trash_service = TrashService(send2trash)
 
         # VLC
         self.vlc_instance = _create_vlc_instance()
@@ -448,7 +442,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._ending = True
 
         try:
-            next_original_idx = adjacent_index(
+            next_original_idx = self.playlist_controller.adjacent_index(
                 self.directory_playlist,
                 playlist,
                 self.current_index,
@@ -573,7 +567,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _get_current_playlist(self) -> list[str]:
         """現在の再生モードに応じたプレイリストを返すヘルパーメソッド"""
-        return active_playlist(
+        return self.playlist_controller.active(
             self.directory_playlist,
             self.shuffled_playlist,
             self.shuffle_enabled,
@@ -585,7 +579,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         log_message(
             f"play_next(): current_index={self.current_index}, playlist_len={len(playlist)}"
         )
-        next_original_idx = adjacent_index(
+        next_original_idx = self.playlist_controller.adjacent_index(
             self.directory_playlist,
             playlist,
             self.current_index,
@@ -608,7 +602,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def play_previous(self) -> None:
         diagnostics.record_breadcrumb("play_previous_requested")
         playlist = self._get_current_playlist()
-        prev_original_idx = adjacent_index(
+        prev_original_idx = self.playlist_controller.adjacent_index(
             self.directory_playlist,
             playlist,
             self.current_index,
@@ -1070,7 +1064,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         if self.shuffle_enabled and self.directory_playlist:
             log_message("Shuffle mode enabled. Creating shuffled playlist.")
-            self.shuffled_playlist = create_shuffled_playlist(
+            self.shuffled_playlist = self.playlist_controller.shuffled(
                 self.directory_playlist,
                 self.current_index,
                 random.shuffle,
@@ -1130,7 +1124,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             f"移動先フォルダ '{subfolder_name}' に同名のファイル\n'{file_name}' が既に存在します。"
         )
         box.setInformativeText("どうしますか？")
-        if send2trash is not None:
+        if self.trash_service.available:
             delete_button = box.addButton(
                 "現在のファイルをごみ箱へ移動",
                 QtWidgets.QMessageBox.DestructiveRole,
@@ -1157,7 +1151,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def _discard_current_file(self, file_path: str) -> None:
         """現在のファイルをごみ箱へ移動する。ごみ箱が使えない場合は削除しない。"""
-        TrashService(send2trash).discard(file_path)
+        self.trash_service.discard(file_path)
         log_message(f"Moved source file to trash: '{file_path}' (target already existed).")
 
     def _move_current_file_and_play_next(self, subfolder_name: str):
@@ -1189,7 +1183,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             next_path = None
             if self.shuffle_enabled:
                 playlist = self._get_current_playlist()
-                next_path = next_path_after_current(playlist, current_file_path)
+                next_path = self.playlist_controller.next_path(playlist, current_file_path)
 
             # --- ファイルパスの準備 ---
             file_name = os.path.basename(current_file_path)
@@ -1322,7 +1316,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 return
 
             # 次に再生する index を決定
-            next_index = next_index_after_removal(
+            next_index = self.playlist_controller.next_index_after_removal(
                 self.directory_playlist,
                 index_to_remove,
                 self.shuffle_enabled,

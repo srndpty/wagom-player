@@ -7,7 +7,6 @@ from PyQt5 import QtCore, QtWidgets
 
 from wagom_player import diagnostics
 from wagom_player.logger import log_message
-from wagom_player.main_window import VideoPlayer
 from wagom_player.single_instance import (
     SingleInstanceServer,
     create_single_instance_server,
@@ -18,6 +17,7 @@ from wagom_player.theme import (
     apply_dark_theme,
     apply_windows_app_user_model_id,
 )
+from wagom_player.ui.main_window import VideoPlayer
 
 # ログメッセージ関数を一時的にオーバーライドしてPIDとタイムスタンプを追加
 original_log_message = log_message

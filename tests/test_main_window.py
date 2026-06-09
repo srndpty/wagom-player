@@ -3,180 +3,13 @@ import os
 
 import pytest
 
+from tests.fakes.vlc import FakeVlc
+from wagom_player.infrastructure.trash import TrashService
+
 QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
 
-main_window = importlib.import_module("wagom_player.main_window")
-
-
-class FakeEventManager:
-    def __init__(self):
-        self.attached = []
-
-    def event_attach(self, event_type, callback):
-        self.attached.append((event_type, callback))
-
-
-class FakeMedia:
-    def __init__(self, path=""):
-        self.path = path
-        self.parsed = False
-        self.duration = 125_000
-        self.meta = {}
-
-    def parse(self):
-        self.parsed = True
-
-    def get_duration(self):
-        return self.duration
-
-    def get_meta(self, field):
-        return self.meta.get(field)
-
-
-class FakePlayer:
-    def __init__(self):
-        self.events = FakeEventManager()
-        self.volume = 80
-        self.muted = False
-        self.rate = 1.0
-        self.time = 0
-        self.length = 120_000
-        self.playing = False
-        self.state = "Paused"
-        self.media = FakeMedia()
-        self.stopped = 0
-        self.played = 0
-        self.surface = None
-
-    def event_manager(self):
-        return self.events
-
-    def audio_set_volume(self, value):
-        self.volume = value
-
-    def audio_get_mute(self):
-        return int(self.muted)
-
-    def audio_set_mute(self, value):
-        self.muted = bool(value)
-
-    def audio_toggle_mute(self):
-        self.muted = not self.muted
-
-    def set_rate(self, value):
-        self.rate = value
-
-    def get_rate(self):
-        return self.rate
-
-    def get_state(self):
-        return self.state
-
-    def is_playing(self):
-        return self.playing
-
-    def pause(self):
-        self.playing = False
-        self.state = "Paused"
-
-    def play(self):
-        self.played += 1
-        self.playing = True
-        self.state = "Playing"
-
-    def stop(self):
-        self.stopped += 1
-        self.playing = False
-        self.state = "Stopped"
-
-    def get_time(self):
-        return self.time
-
-    def set_time(self, value):
-        self.time = value
-
-    def get_length(self):
-        return self.length
-
-    def set_media(self, media):
-        self.media = media
-
-    def get_media(self):
-        return self.media
-
-    def set_hwnd(self, wid):
-        self.surface = ("hwnd", wid)
-
-    def set_nsobject(self, wid):
-        self.surface = ("nsobject", wid)
-
-    def set_xwindow(self, wid):
-        self.surface = ("xwindow", wid)
-
-
-class FakeInstance:
-    def __init__(self, args=None):
-        self.args = args or []
-        self.player = FakePlayer()
-        self.created_media = []
-
-    def media_player_new(self):
-        return self.player
-
-    def media_new(self, path):
-        media = FakeMedia(path)
-        self.created_media.append(media)
-        return media
-
-
-class FakeVlc:
-    class EventType:
-        MediaPlayerEndReached = "ended"
-
-    class State:
-        Stopped = "Stopped"
-        Ended = "Ended"
-        Error = "Error"
-
-    class Meta:
-        Title = "Title"
-        Artist = "Artist"
-        Album = "Album"
-        AlbumArtist = "AlbumArtist"
-        Genre = "Genre"
-        Date = "Date"
-        Description = "Description"
-        TrackNumber = "TrackNumber"
-        TrackTotal = "TrackTotal"
-        DiscNumber = "DiscNumber"
-        DiscTotal = "DiscTotal"
-        TrackID = "TrackID"
-        ShowName = "ShowName"
-        Season = "Season"
-        Episode = "Episode"
-        Director = "Director"
-        Actors = "Actors"
-        Rating = "Rating"
-        Language = "Language"
-        Copyright = "Copyright"
-        Publisher = "Publisher"
-        EncodedBy = "EncodedBy"
-        Setting = "Setting"
-        URL = "URL"
-        ArtworkURL = "ArtworkURL"
-        NowPlaying = "NowPlaying"
-
-    def __init__(self):
-        self.instances = []
-
-    def Instance(self, args):
-        instance = FakeInstance(args)
-        self.instances.append(instance)
-        return instance
-
-    def libvlc_get_version(self):
-        return b"fake-vlc"
+main_window = importlib.import_module("wagom_player.ui.main_window")
 
 
 @pytest.fixture
@@ -488,9 +321,9 @@ def test_move_current_file_target_exists_delete_sends_source_to_trash(
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
-    # 実際のごみ箱を汚さないよう、send2trash を fake に差し替える
+    # 実際のごみ箱を汚さないよう、TrashService を fake に差し替える
     trashed = []
-    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
+    player.trash_service = TrashService(lambda path: trashed.append(path))
     calls = []
     monkeypatch.setattr(
         main_window.QtCore.QTimer,
@@ -521,10 +354,8 @@ def test_move_current_file_target_exists_delete_keeps_playlist_when_trash_fails(
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
-    monkeypatch.setattr(
-        main_window,
-        "send2trash",
-        lambda path: (_ for _ in ()).throw(RuntimeError("trash failed")),
+    player.trash_service = TrashService(
+        lambda path: (_ for _ in ()).throw(RuntimeError("trash failed"))
     )
     calls = []
     monkeypatch.setattr(player, "play_at", calls.append)
@@ -549,8 +380,8 @@ def test_move_current_file_target_exists_delete_does_not_fall_back_to_remove(
     player.directory_playlist = [str(first)]
     player.current_index = 0
     player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
-    # send2trash が無い環境では完全削除にフォールバックしない
-    monkeypatch.setattr(main_window, "send2trash", None)
+    # ごみ箱が無い環境では完全削除にフォールバックしない
+    player.trash_service = TrashService(None)
 
     player._move_current_file_and_play_next("_ok")
 
@@ -570,7 +401,7 @@ def test_move_current_file_release_timeout_aborts_operation(player, tmp_path, mo
     # メディア解放がタイムアウトした状況を模す
     monkeypatch.setattr(player, "_release_current_media_for_file_operation", lambda: False)
     trashed = []
-    monkeypatch.setattr(main_window, "send2trash", lambda path: trashed.append(path))
+    player.trash_service = TrashService(lambda path: trashed.append(path))
     calls = []
     monkeypatch.setattr(player, "play_at", calls.append)
 

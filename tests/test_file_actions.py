@@ -35,9 +35,7 @@ def test_unique_target_path_avoids_existing_names(tmp_path: Path):
     (target_dir / "movie.mp4").write_text("a", encoding="utf-8")
     (target_dir / "movie (1).mp4").write_text("b", encoding="utf-8")
 
-    assert unique_target_path_for_subfolder(str(source), "_ok") == str(
-        target_dir / "movie (2).mp4"
-    )
+    assert unique_target_path_for_subfolder(str(source), "_ok") == str(target_dir / "movie (2).mp4")
 
 
 def test_move_file_to_path_moves_to_explicit_target(tmp_path: Path):

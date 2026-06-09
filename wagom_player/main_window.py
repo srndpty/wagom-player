@@ -986,9 +986,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 # old player/instance は worker closure が保持する。明示 release は行わず、
                 # 遅延 stop の影響を fresh player への差し替えと generation guard で隔離する。
                 # timeout が多発する環境では、old libVLC object が worker 完了まで残る。
-                log_message(
-                    "[release] stale VLC player may remain until delayed stop finishes"
-                )
+                log_message("[release] stale VLC player may remain until delayed stop finishes")
                 self._create_fresh_vlc_player()
                 return False
 
@@ -1327,8 +1325,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         box.setIcon(QtWidgets.QMessageBox.Warning)
         box.setWindowTitle("移動先に同名ファイルが存在します")
         box.setText(
-            f"移動先フォルダ '{subfolder_name}' に同名のファイル\n"
-            f"'{file_name}' が既に存在します。"
+            f"移動先フォルダ '{subfolder_name}' に同名のファイル\n'{file_name}' が既に存在します。"
         )
         box.setInformativeText("どうしますか？")
         if send2trash is not None:
@@ -1338,9 +1335,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             )
         else:
             delete_button = None
-            box.setInformativeText(
-                "ごみ箱機能が利用できないため、現在のファイルは削除できません。"
-            )
+            box.setInformativeText("ごみ箱機能が利用できないため、現在のファイルは削除できません。")
         rename_button = box.addButton("別名で移動保存", QtWidgets.QMessageBox.AcceptRole)
         cancel_button = box.addButton("キャンセル", QtWidgets.QMessageBox.RejectRole)
         box.setDefaultButton(cancel_button)
@@ -1407,9 +1402,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 target_file_path = validate_move_to_subfolder(current_file_path, subfolder_name)
             except TargetFileExistsError:
                 existing_target = target_path_for_subfolder(current_file_path, subfolder_name)
-                log_message(
-                    f"File '{file_name}' already exists in target directory. Asking user."
-                )
+                log_message(f"File '{file_name}' already exists in target directory. Asking user.")
                 diagnostics.record_breadcrumb(
                     "move_current_file_target_exists", target=existing_target
                 )
@@ -1450,9 +1443,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                             f"ごみ箱への移動に失敗: {e}（再生は停止しました）",
                             5000,
                         )
-                        diagnostics.record_breadcrumb(
-                            "move_current_file_trash_error", error=str(e)
-                        )
+                        diagnostics.record_breadcrumb("move_current_file_trash_error", error=str(e))
                         return
                     self._show_status_message(
                         f"ごみ箱へ移動: {file_name}（移動先に同名ファイルが存在）",

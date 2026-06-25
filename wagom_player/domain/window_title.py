@@ -2,7 +2,7 @@ import os
 from collections.abc import Sequence
 from typing import Optional
 
-from .formatting import format_ms
+from .formatting import format_ms, format_size
 
 
 def build_window_title(
@@ -12,6 +12,7 @@ def build_window_title(
     shuffle_enabled: bool,
     media_length_ms: int,
     filename: Optional[str] = None,
+    file_size_bytes: int = -1,
 ) -> str:
     name = filename or (os.path.basename(current_path) if current_path else "")
     try:
@@ -22,4 +23,5 @@ def build_window_title(
     prefix = f"[{index}/{len(playlist)}] " if playlist else ""
     shuffle_indicator = "[S] " if shuffle_enabled else ""
     duration = f" [{format_ms(media_length_ms)}]" if media_length_ms > 0 else ""
-    return f"{shuffle_indicator}{prefix}{name}{duration}"
+    size = f" [{format_size(file_size_bytes)}]" if file_size_bytes >= 0 else ""
+    return f"{shuffle_indicator}{prefix}{name}{duration}{size}"

@@ -132,6 +132,23 @@ def test_current_playlist_title_and_formatting(player):
     assert player.windowTitle() == "[S] [1/2] custom.mp4 [01:01:00]"
 
 
+def test_window_title_includes_file_size(player, tmp_path):
+    movie = tmp_path / "movie.mp4"
+    movie.write_bytes(b"x" * 2048)
+    player.directory_playlist = [str(movie)]
+    player.current_index = 0
+    player._media_length = 65_000
+
+    player._update_window_title()
+
+    assert player.windowTitle() == f"[1/1] movie.mp4 [01:05] [{2.0:.2f} KB]"
+
+
+def test_current_file_size_bytes_missing_file_returns_minus_one(player, tmp_path):
+    assert player._current_file_size_bytes("") == -1
+    assert player._current_file_size_bytes(str(tmp_path / "nope.mp4")) == -1
+
+
 def test_playback_controls_seek_rate_volume_and_mute(player):
     player.directory_playlist = ["a.mp4"]
     player.current_index = 0

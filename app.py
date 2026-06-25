@@ -93,6 +93,9 @@ def _claim_via_send_listen(initial_file: Optional[str], lock):
         return None, True, lock
     single_instance_server = create_single_instance_server(remove_stale=True)
     if single_instance_server is None:
+        if send_to_existing_instance(initial_file):
+            log_message("Existing wagom-player instance found. Forwarded request and exiting.")
+            return None, True, lock
         log_message("Single-instance server unavailable; continuing without IPC.")
     return single_instance_server, False, lock
 

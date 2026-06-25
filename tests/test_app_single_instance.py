@@ -241,3 +241,32 @@ def test_claim_single_instance_removes_stale_after_exclusive_listen_and_retry_fa
     assert server is sentinel
     assert returned_lock is lock
     assert create_calls == [False, True]
+
+
+def test_claim_single_instance_retries_forward_after_stale_listen_failure(monkeypatch):
+    # stale 削除つき listen も失敗した直後に別プロセスがホスト化した場合、
+    # 最後にもう一度転送して二次プロセスを終了させる。
+    lock = _FakeLock(is_primary=True, available=False)
+    send_calls = []
+    create_calls = []
+
+    monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
+
+    def fake_send(file_path, timeout_ms=500):
+        send_calls.append(file_path)
+        return len(send_calls) == 3
+
+    monkeypatch.setattr(app_module, "send_to_existing_instance", fake_send)
+    monkeypatch.setattr(
+        app_module,
+        "create_single_instance_server",
+        lambda *, remove_stale=True: create_calls.append(remove_stale) or None,
+    )
+
+    server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
+
+    assert forwarded
+    assert server is None
+    assert returned_lock is lock
+    assert send_calls == ["movie.mp4", "movie.mp4", "movie.mp4"]
+    assert create_calls == [False, True]

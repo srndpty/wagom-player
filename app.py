@@ -77,10 +77,10 @@ def _forward_or_take_over(
 
 
 def _claim_via_send_listen(initial_file: Optional[str], lock):
-    """mutex が使えない環境向けのフォールバック調停(送信→排他 listen→再送)。
+    """既存 IPC を優先しつつホストを確保する(送信→排他 listen→再送)。
 
-    非 Windows では QLocalServer.listen() が排他的なため従来どおり単一インスタンス
-    制御が機能する。Windows で CreateMutexW に失敗した場合のセーフティネットでもある。
+    mutex primary でも旧バイナリや mutex 不可 fallback で起動済みの IPC サーバが
+    ありうるため、stale 削除つき listen の前に既存 IPC への送信と排他 listen を試す。
     """
     if send_to_existing_instance(initial_file):
         log_message("Existing wagom-player instance found. Forwarded request and exiting.")
@@ -125,10 +125,7 @@ def _claim_single_instance(initial_file: Optional[str]):
             log_message("Primary instance unresponsive; exiting secondary instance.")
             return None, True, lock
 
-    single_instance_server = create_single_instance_server(remove_stale=True)
-    if single_instance_server is None:
-        log_message("Single-instance server unavailable; continuing without IPC.")
-    return single_instance_server, False, lock
+    return _claim_via_send_listen(initial_file, lock)
 
 
 def main_wrapper(argv: list[str]) -> int:

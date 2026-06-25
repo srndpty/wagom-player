@@ -50,10 +50,38 @@ def test_claim_single_instance_forwards_when_not_primary(monkeypatch):
     assert create_calls == []  # 転送できたらホスト化しない
 
 
+def test_claim_single_instance_forwards_existing_ipc_when_primary(monkeypatch):
+    # mutex を取れても、旧バイナリや fallback 起動済みプロセスの IPC があれば転送する。
+    lock = _FakeLock(is_primary=True)
+    send_calls = []
+    create_calls = []
+
+    monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
+    monkeypatch.setattr(
+        app_module,
+        "send_to_existing_instance",
+        lambda file_path, timeout_ms=500: send_calls.append(file_path) or True,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "create_single_instance_server",
+        lambda *, remove_stale=True: create_calls.append(remove_stale),
+    )
+
+    server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
+
+    assert forwarded
+    assert server is None
+    assert returned_lock is lock
+    assert send_calls == ["movie.mp4"]
+    assert create_calls == []
+
+
 def test_claim_single_instance_hosts_when_primary(monkeypatch):
     sentinel = object()
     lock = _FakeLock(is_primary=True)
     send_calls = []
+    create_calls = []
 
     monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
     monkeypatch.setattr(
@@ -64,7 +92,7 @@ def test_claim_single_instance_hosts_when_primary(monkeypatch):
     monkeypatch.setattr(
         app_module,
         "create_single_instance_server",
-        lambda *, remove_stale=True: sentinel,
+        lambda *, remove_stale=True: create_calls.append(remove_stale) or sentinel,
     )
 
     server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
@@ -72,7 +100,8 @@ def test_claim_single_instance_hosts_when_primary(monkeypatch):
     assert not forwarded
     assert server is sentinel
     assert returned_lock is lock
-    assert send_calls == []  # primary は転送を試みない
+    assert send_calls == ["movie.mp4"]
+    assert create_calls == [False]  # stale 削除前の排他 listen でホスト化
 
 
 def test_claim_single_instance_takes_over_when_primary_dies(monkeypatch):
@@ -99,7 +128,7 @@ def test_claim_single_instance_takes_over_when_primary_dies(monkeypatch):
     assert server is sentinel
     assert returned_lock is lock
     assert lock.is_primary
-    assert create_calls == [True]  # 引き継いだ 1 プロセスだけがホスト化
+    assert create_calls == [False]  # 引き継ぎ後も既存 IPC を壊さずホスト化
 
 
 def test_claim_single_instance_exits_when_takeover_fails(monkeypatch):

@@ -4,8 +4,9 @@ app_module = importlib.import_module("app")
 
 
 class _FakeLock:
-    def __init__(self, is_primary, take_over_after=None):
+    def __init__(self, is_primary, take_over_after=None, available=True):
         self.is_primary = is_primary
+        self.available = available
         # None: 所有権を取れない。int: try_become_primary の N 回目で取得して primary に。
         self._take_over_after = take_over_after
         self._calls = 0
@@ -127,3 +128,54 @@ def test_claim_single_instance_skips_server_when_takeover_fails(monkeypatch):
     assert returned_lock is lock
     assert not lock.is_primary
     assert create_calls == []  # サーバは立てない(レース回避)
+
+
+def test_claim_single_instance_falls_back_to_forward_when_mutex_unavailable(monkeypatch):
+    # mutex 不可(非 Windows / CreateMutexW 失敗)でも、既存インスタンスへは送信する。
+    lock = _FakeLock(is_primary=True, available=False)
+    send_calls = []
+    create_calls = []
+
+    monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
+    monkeypatch.setattr(
+        app_module,
+        "send_to_existing_instance",
+        lambda file_path, timeout_ms=500: send_calls.append(file_path) or True,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "create_single_instance_server",
+        lambda *, remove_stale=True: create_calls.append(remove_stale),
+    )
+
+    server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
+
+    assert forwarded  # is_primary=True でも送信を試して転送する
+    assert server is None
+    assert returned_lock is lock
+    assert send_calls == ["movie.mp4"]
+    assert create_calls == []
+
+
+def test_claim_single_instance_hosts_via_listen_when_mutex_unavailable(monkeypatch):
+    # mutex 不可で既存インスタンスも無ければ listen で自分がホストになる。
+    sentinel = object()
+    lock = _FakeLock(is_primary=True, available=False)
+
+    monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
+    monkeypatch.setattr(
+        app_module,
+        "send_to_existing_instance",
+        lambda file_path, timeout_ms=500: False,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "create_single_instance_server",
+        lambda *, remove_stale=True: sentinel,
+    )
+
+    server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
+
+    assert not forwarded
+    assert server is sentinel
+    assert returned_lock is lock

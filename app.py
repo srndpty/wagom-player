@@ -76,6 +76,21 @@ def _forward_or_take_over(
     return False
 
 
+def _claim_via_send_listen(initial_file: Optional[str], lock):
+    """mutex が使えない環境向けのフォールバック調停(送信→無ければ listen)。
+
+    非 Windows では QLocalServer.listen() が排他的なため従来どおり単一インスタンス
+    制御が機能する。Windows で CreateMutexW に失敗した場合のセーフティネットでもある。
+    """
+    if send_to_existing_instance(initial_file):
+        log_message("Existing wagom-player instance found. Forwarded request and exiting.")
+        return None, True, lock
+    single_instance_server = create_single_instance_server(remove_stale=True)
+    if single_instance_server is None:
+        log_message("Single-instance server unavailable; continuing without IPC.")
+    return single_instance_server, False, lock
+
+
 def _claim_single_instance(initial_file: Optional[str]):
     """所有権ベースの mutex でホストを 1 つに選び、転送するか IPC サーバを確保する。
 
@@ -83,6 +98,10 @@ def _claim_single_instance(initial_file: Optional[str]):
     必要があるため、呼び出し側がプロセス終了まで参照を維持する。
     """
     lock = acquire_primary_instance_lock()
+    if not lock.available:
+        # mutex が使えない(非 Windows / CreateMutexW 失敗)。常に primary 扱いになって
+        # 単一インスタンス制御が無効化されるのを避けるため、send/listen 調停に戻す。
+        return _claim_via_send_listen(initial_file, lock)
     if not lock.is_primary:
         # 既存インスタンスが居る/起動中。listen 完了までリトライしつつ転送。
         # primary が落ちたら、この中で所有権を取り直して 1 つだけが引き継ぐ。

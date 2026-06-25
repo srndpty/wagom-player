@@ -28,7 +28,9 @@
 param(
     [string]$ExePath = "C:\Program Files\wagom-player\wagom-player.exe",
     [string]$File = "",
+    [ValidateRange(1, 100000)]
     [int]$Iterations = 30,
+    [ValidateRange(0, 3600)]
     [double]$WaitSeconds = 4
 )
 
@@ -46,6 +48,8 @@ if (-not $File) {
         [System.IO.File]::WriteAllBytes($File, (New-Object byte[] 1024))
     }
 }
+# 明示指定したパスは存在確認する（typo で無言起動するのを防ぐ）
+if (-not (Test-Path -LiteralPath $File)) { throw "file not found: $File" }
 Write-Host "exe : $ExePath"
 Write-Host "file: $File"
 Write-Host "iterations: $Iterations`n"
@@ -86,7 +90,8 @@ for ($n = 1; $n -le $Iterations; $n++) {
     $pids = Start-TwoSimultaneously -Exe $ExePath -Arg $File
     Start-Sleep -Seconds $WaitSeconds
 
-    # 生存プロセス数＝開いているウィンドウ数（転送側は即終了、ホストだけ残る）
+    # 生存プロセス数（転送側は即終了、ホストだけ残る）。ただしこれは「GUI 本体だけが
+    # 残る」設計への依存があり、将来 helper/常駐プロセス等が増えると過大評価し得る。
     $alive = @(Get-Process -Name $procName -ErrorAction SilentlyContinue)
     $aliveCount = $alive.Count
 
@@ -97,7 +102,9 @@ for ($n = 1; $n -le $Iterations; $n++) {
         Where-Object { (Get-Content -LiteralPath $_.FullName -Raw) -notmatch "Forwarded request" })
     $hostCount = $hostSessions.Count
 
-    $isDouble = ($aliveCount -ge 2)
+    # 単一インスタンス競合の再現は「ホストが2つ」が本質。生存プロセス数だけだと
+    # 上記の理由で誤判定し得るため、ログ上のホスト数とのANDで強めに判定する。
+    $isDouble = ($aliveCount -ge 2 -and $hostCount -ge 2)
     if ($isDouble) { $doubleCount++ }
 
     $tag = if ($isDouble) { "DOUBLE (bug)" } else { "ok" }

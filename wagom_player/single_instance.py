@@ -31,8 +31,17 @@ class PrimaryInstanceLock:
     ただ 1 プロセスだけが成功する。
     """
 
-    def __init__(self, is_primary: bool, handle: Optional[int] = None, kernel32=None):
+    def __init__(
+        self,
+        is_primary: bool,
+        handle: Optional[int] = None,
+        kernel32=None,
+        available: bool = False,
+    ):
         self.is_primary = is_primary
+        # available=False は「mutex が使えない(非 Windows / 作成失敗)」を意味し、
+        # 呼び出し側は所有権ベースの選出ではなく従来の send/listen 調停に戻す。
+        self.available = available
         self._handle = handle
         self._kernel32 = kernel32
         self._owns = False
@@ -104,7 +113,9 @@ def acquire_primary_instance_lock(
             err = ctypes.get_last_error()
             log_message(f"CreateMutexW failed (err={err}); assuming primary instance.")
             return PrimaryInstanceLock(True)
-        lock = PrimaryInstanceLock(is_primary=False, handle=handle, kernel32=kernel32)
+        lock = PrimaryInstanceLock(
+            is_primary=False, handle=handle, kernel32=kernel32, available=True
+        )
         lock.try_become_primary(timeout_ms=0)
         return lock
     except Exception as e:

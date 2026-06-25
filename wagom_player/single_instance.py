@@ -63,9 +63,7 @@ def acquire_primary_instance_lock(
         handle = kernel32.CreateMutexW(None, False, name)
         last_error = ctypes.get_last_error()
         if not handle:
-            log_message(
-                f"CreateMutexW failed (err={last_error}); assuming primary instance."
-            )
+            log_message(f"CreateMutexW failed (err={last_error}); assuming primary instance.")
             return PrimaryInstanceLock(True)
         is_primary = last_error != _ERROR_ALREADY_EXISTS
         return PrimaryInstanceLock(is_primary, handle)

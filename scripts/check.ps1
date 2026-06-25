@@ -1,10 +1,18 @@
-param(
+﻿param(
     [string] $DiffRange = "",
-    [switch] $Fix
+    [switch] $Fix,
+    [switch] $Check
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+# 既定の挙動: ローカル実行では自動整形(-Fix)、CI ではチェックのみ(ゲート)。
+# 明示的に -Fix / -Check を渡せば上書きできる。
+if (-not $Fix -and -not $Check) {
+    $inCi = ($env:CI -eq "true") -or ($env:GITHUB_ACTIONS -eq "true")
+    if ($inCi) { $Check = $true } else { $Fix = $true }
+}
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $root

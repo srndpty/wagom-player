@@ -77,11 +77,17 @@ def _forward_or_take_over(
 
 
 def _claim_via_send_listen(initial_file: Optional[str], lock):
-    """mutex が使えない環境向けのフォールバック調停(送信→無ければ listen)。
+    """mutex が使えない環境向けのフォールバック調停(送信→排他 listen→再送)。
 
     非 Windows では QLocalServer.listen() が排他的なため従来どおり単一インスタンス
     制御が機能する。Windows で CreateMutexW に失敗した場合のセーフティネットでもある。
     """
+    if send_to_existing_instance(initial_file):
+        log_message("Existing wagom-player instance found. Forwarded request and exiting.")
+        return None, True, lock
+    single_instance_server = create_single_instance_server(remove_stale=False)
+    if single_instance_server is not None:
+        return single_instance_server, False, lock
     if send_to_existing_instance(initial_file):
         log_message("Existing wagom-player instance found. Forwarded request and exiting.")
         return None, True, lock

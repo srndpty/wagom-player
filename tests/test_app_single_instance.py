@@ -161,6 +161,7 @@ def test_claim_single_instance_hosts_via_listen_when_mutex_unavailable(monkeypat
     # mutex 不可で既存インスタンスも無ければ listen で自分がホストになる。
     sentinel = object()
     lock = _FakeLock(is_primary=True, available=False)
+    create_calls = []
 
     monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
     monkeypatch.setattr(
@@ -171,7 +172,7 @@ def test_claim_single_instance_hosts_via_listen_when_mutex_unavailable(monkeypat
     monkeypatch.setattr(
         app_module,
         "create_single_instance_server",
-        lambda *, remove_stale=True: sentinel,
+        lambda *, remove_stale=True: create_calls.append(remove_stale) or sentinel,
     )
 
     server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
@@ -179,3 +180,64 @@ def test_claim_single_instance_hosts_via_listen_when_mutex_unavailable(monkeypat
     assert not forwarded
     assert server is sentinel
     assert returned_lock is lock
+    assert create_calls == [False]  # stale 削除前の排他 listen でホスト化
+
+
+def test_claim_single_instance_retries_forward_before_stale_removal(monkeypatch):
+    # mutex 不可で同時起動した場合、片方が排他 listen に成功した直後なら、
+    # stale 削除へ進む前に再送して二次プロセスを終了させる。
+    lock = _FakeLock(is_primary=True, available=False)
+    send_calls = []
+    create_calls = []
+
+    monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
+
+    def fake_send(file_path, timeout_ms=500):
+        send_calls.append(file_path)
+        return len(send_calls) == 2
+
+    monkeypatch.setattr(app_module, "send_to_existing_instance", fake_send)
+    monkeypatch.setattr(
+        app_module,
+        "create_single_instance_server",
+        lambda *, remove_stale=True: create_calls.append(remove_stale) or None,
+    )
+
+    server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
+
+    assert forwarded
+    assert server is None
+    assert returned_lock is lock
+    assert send_calls == ["movie.mp4", "movie.mp4"]
+    assert create_calls == [False]  # 稼働中サーバ名を removeServer しない
+
+
+def test_claim_single_instance_removes_stale_after_exclusive_listen_and_retry_fail(
+    monkeypatch,
+):
+    # 排他 listen と再送の両方が失敗した場合だけ stale 削除つき listen に進む。
+    sentinel = object()
+    lock = _FakeLock(is_primary=True, available=False)
+    create_calls = []
+
+    monkeypatch.setattr(app_module, "acquire_primary_instance_lock", lambda: lock)
+    monkeypatch.setattr(
+        app_module,
+        "send_to_existing_instance",
+        lambda file_path, timeout_ms=500: False,
+    )
+
+    def fake_create(*, remove_stale=True):
+        create_calls.append(remove_stale)
+        if remove_stale:
+            return sentinel
+        return None
+
+    monkeypatch.setattr(app_module, "create_single_instance_server", fake_create)
+
+    server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
+
+    assert not forwarded
+    assert server is sentinel
+    assert returned_lock is lock
+    assert create_calls == [False, True]

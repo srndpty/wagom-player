@@ -1,4 +1,5 @@
 import importlib
+import sys
 import threading
 import uuid
 
@@ -8,6 +9,33 @@ QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtNetwork = pytest.importorskip("PyQt5.QtNetwork", exc_type=ImportError)
 
 single_instance = importlib.import_module("wagom_player.single_instance")
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("win"),
+    reason="named-mutex primary lock is Windows-specific",
+)
+def test_primary_instance_lock_is_exclusive():
+    name = f"wagom-player-test-lock-{uuid.uuid4()}"
+
+    # 最初の取得は primary。保持中の2つ目は primary になれない。
+    first = single_instance.acquire_primary_instance_lock(name)
+    try:
+        assert first.is_primary
+        second = single_instance.acquire_primary_instance_lock(name)
+        try:
+            assert not second.is_primary
+        finally:
+            second.release()
+    finally:
+        first.release()
+
+    # 全て解放されたら、次の取得は再び primary になれる。
+    third = single_instance.acquire_primary_instance_lock(name)
+    try:
+        assert third.is_primary
+    finally:
+        third.release()
 
 
 def _wait_until(qapp, predicate, timeout_ms=1000):

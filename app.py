@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -9,6 +10,7 @@ from wagom_player import diagnostics
 from wagom_player.logger import log_message
 from wagom_player.single_instance import (
     SingleInstanceServer,
+    acquire_primary_instance_lock,
     create_single_instance_server,
     send_to_existing_instance,
 )
@@ -48,32 +50,42 @@ def _configure_runtime_environment() -> None:
     log_message(f"PYTHON_VLC_LIB_PATH={os.environ.get('PYTHON_VLC_LIB_PATH', '')!r}")
 
 
+def _forward_to_primary(
+    initial_file: Optional[str],
+    attempts: int = 20,
+    interval_ms: int = 50,
+) -> bool:
+    """primary プロセスへファイルを転送する。
+
+    primary は mutex 取得直後でまだ IPC サーバを listen していないことがあるため、
+    接続できるまで短くリトライする(最大 attempts*interval_ms ミリ秒)。
+    """
+    for _ in range(attempts):
+        if send_to_existing_instance(initial_file):
+            return True
+        time.sleep(interval_ms / 1000)
+    return False
+
+
 def _claim_single_instance(initial_file: Optional[str]):
-    """既存プロセスへ転送するか、このプロセス用の IPC サーバを確保する。"""
-    if send_to_existing_instance(initial_file):
-        log_message("Existing wagom-player instance found. Forwarded request and exiting.")
-        return None, True
+    """primary かどうかを mutex で原子的に決め、転送するか IPC サーバを確保する。
 
-    single_instance_server = create_single_instance_server(remove_stale=False)
-    if single_instance_server is not None:
-        return single_instance_server, False
-
-    # 同時起動時は、最初の送信時点ではサーバ未作成でも、この時点で他方が作成済みの
-    # ことがある。stale socket を消す前に再送して、稼働中のインスタンスを壊さない。
-    if send_to_existing_instance(initial_file, timeout_ms=1000):
-        log_message("Existing wagom-player instance appeared. Forwarded request and exiting.")
-        return None, True
+    返り値は ``(server, forwarded, lock)``。``lock`` はホストである限り保持し続ける
+    必要があるため、呼び出し側がプロセス終了まで参照を維持する。
+    """
+    lock = acquire_primary_instance_lock()
+    if not lock.is_primary:
+        # 既存インスタンスが居る/起動中。listen 完了までリトライしつつ転送。
+        if _forward_to_primary(initial_file):
+            log_message("Existing wagom-player instance found. Forwarded request and exiting.")
+            return None, True, lock
+        # 到達不能(primary が起動途中で落ちた等)。自分がホストを引き継ぐ。
+        log_message("Primary instance unreachable; taking over as primary instance.")
 
     single_instance_server = create_single_instance_server(remove_stale=True)
-    if single_instance_server is not None:
-        return single_instance_server, False
-
-    if send_to_existing_instance(initial_file, timeout_ms=1000):
-        log_message("Existing wagom-player instance found after retry. Forwarded request.")
-        return None, True
-
-    log_message("Single-instance server unavailable; continuing without IPC.")
-    return None, False
+    if single_instance_server is None:
+        log_message("Single-instance server unavailable; continuing without IPC.")
+    return single_instance_server, False, lock
 
 
 def main_wrapper(argv: list[str]) -> int:
@@ -127,9 +139,13 @@ def main(argv: list[str]) -> int:
     app = _create_application(argv)
     initial_file = _find_initial_file(argv)
     log_message(f"initial_file={initial_file!r}")
-    single_instance_server, forwarded = _claim_single_instance(initial_file)
+    single_instance_server, forwarded, instance_lock = _claim_single_instance(initial_file)
     if forwarded:
+        instance_lock.release()
         return 0
+
+    # ホストである限り mutex を保持し続ける必要があるため、app に紐付けて生かす。
+    app._single_instance_lock = instance_lock
 
     apply_dark_theme(app)
     apply_windows_app_user_model_id("wagom-player")

@@ -1,4 +1,5 @@
 import importlib
+import sys
 import threading
 import uuid
 
@@ -8,6 +9,42 @@ QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtNetwork = pytest.importorskip("PyQt5.QtNetwork", exc_type=ImportError)
 
 single_instance = importlib.import_module("wagom_player.single_instance")
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("win"),
+    reason="named-mutex primary lock is Windows-specific",
+)
+def test_primary_instance_lock_is_exclusive():
+    name = f"wagom-player-test-lock-{uuid.uuid4()}"
+
+    # 最初の取得は所有権を得て primary。
+    first = single_instance.acquire_primary_instance_lock(name)
+    try:
+        assert first.is_primary
+
+        # 別スレッド(=別オーナー。実環境の別プロセス相当)からは所有権を取れない。
+        # ※ 同一スレッドでの再取得は mutex の再入で成功してしまうためスレッドで分ける。
+        result = {}
+
+        def worker():
+            other = single_instance.acquire_primary_instance_lock(name)
+            result["is_primary"] = other.is_primary
+            other.release()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2)
+        assert result.get("is_primary") is False
+    finally:
+        first.release()
+
+    # 所有者が解放したら、次の取得は再び所有権を得られる。
+    third = single_instance.acquire_primary_instance_lock(name)
+    try:
+        assert third.is_primary
+    finally:
+        third.release()
 
 
 def _wait_until(qapp, predicate, timeout_ms=1000):

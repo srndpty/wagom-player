@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   wagom-player の「二重ウィンドウ」バグを、Explorer のダブルクリックに頼らず
   決定論的に再現するハーネス。

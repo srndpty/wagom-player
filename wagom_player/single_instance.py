@@ -10,45 +10,84 @@ from .logger import log_message
 SINGLE_INSTANCE_SERVER_NAME = "wagom-player-single-instance-v1"
 MAX_SINGLE_INSTANCE_PAYLOAD_BYTES = 64 * 1024
 
-# 「最初の1つ」を原子的に決めるための名前付き mutex。
+# ホスト(=IPC サーバを立てるプロセス)を 1 つに絞るための名前付き mutex。
 # QLocalServer.listen() は Windows の名前付きパイプ仕様上、複数プロセスが同名で
-# 同時に成功しうるため、起動が同一ミリ秒で衝突すると両方がホスト化してしまう。
-# CreateMutexW はカーネルで直列化され、ERROR_ALREADY_EXISTS が原子的に返るため、
-# 同時起動でも primary は必ず 1 プロセスだけになる。
+# 同時に成功しうるため、同一ミリ秒で衝突すると両方がホスト化してしまう。
+# そこで mutex の「存在」ではなく「所有権」でホストを選出する。所有権は排他的で、
+# 所有者が異常終了すると WAIT_ABANDONED で待機中の 1 プロセスだけが引き継げるため、
+# 同時起動でも、ホストが listen 前に死んだ後の乗っ取りでも、ホストは常に 1 つになる。
 PRIMARY_INSTANCE_MUTEX_NAME = "wagom-player-single-instance-lock-v1"
-_ERROR_ALREADY_EXISTS = 183
+_WAIT_OBJECT_0 = 0x00000000
+_WAIT_ABANDONED = 0x00000080
 
 
 class PrimaryInstanceLock:
-    """起動プロセスがこのセッションで最初の(=ホストになるべき)インスタンスか保持する。
+    """このプロセスがホスト(=IPC サーバを立てるべきインスタンス)かを保持する。
 
     ``is_primary`` が True のプロセスだけが IPC サーバを立てる。ホストである限り
-    OS にこの mutex ハンドルを保持させ続ける必要があるため、ホスト側ではプロセス
-    終了まで ``release()`` を呼ばない。
+    mutex の所有権を保持し続ける必要があるため、ホスト側ではプロセス終了まで
+    ``release()`` を呼ばない。``try_become_primary()`` は所有権の獲得を試み、
+    既存ホストが生きていれば失敗、ホストが所有権を手放した/異常終了していれば
+    ただ 1 プロセスだけが成功する。
     """
 
-    def __init__(self, is_primary: bool, handle: Optional[int] = None):
+    def __init__(self, is_primary: bool, handle: Optional[int] = None, kernel32=None):
         self.is_primary = is_primary
         self._handle = handle
+        self._kernel32 = kernel32
+        self._owns = False
+
+    def try_become_primary(self, timeout_ms: int = 0) -> bool:
+        """mutex の所有権(ホスト権)の獲得を試みる。獲得できれば primary になる。
+
+        既存ホストが所有権を保持していれば WAIT_TIMEOUT で False。ホストが
+        ``release()``/異常終了で手放していれば、待機プロセスのうち 1 つだけが
+        WAIT_OBJECT_0 / WAIT_ABANDONED を受け取り True を返す。
+        """
+        if self._handle is None:
+            # 非 Windows / フェイルオープン: 常にホスト扱い。
+            self.is_primary = True
+            return True
+        if self._owns:
+            return True
+        try:
+            k = self._kernel32
+            k.WaitForSingleObject.restype = ctypes.c_uint32
+            k.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            rc = k.WaitForSingleObject(self._handle, timeout_ms)
+        except Exception as e:  # pragma: no cover - 取得失敗は致命的ではない
+            log_message(f"Failed to acquire primary-instance ownership: {e!r}")
+            return False
+        if rc in (_WAIT_OBJECT_0, _WAIT_ABANDONED):
+            self.is_primary = True
+            self._owns = True
+            return True
+        return False
 
     def release(self) -> None:
-        if self._handle is not None:
-            try:
-                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-                kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-                kernel32.CloseHandle(self._handle)
-            except Exception as e:  # pragma: no cover - 解放失敗は致命的ではない
-                log_message(f"Failed to release primary-instance lock: {e!r}")
-            self._handle = None
+        if self._handle is None:
+            return
+        try:
+            k = self._kernel32
+            if self._owns:
+                k.ReleaseMutex.argtypes = [ctypes.c_void_p]
+                k.ReleaseMutex(self._handle)
+                self._owns = False
+            k.CloseHandle.argtypes = [ctypes.c_void_p]
+            k.CloseHandle(self._handle)
+        except Exception as e:  # pragma: no cover - 解放失敗は致命的ではない
+            log_message(f"Failed to release primary-instance lock: {e!r}")
+        self._handle = None
 
 
 def acquire_primary_instance_lock(
     name: str = PRIMARY_INSTANCE_MUTEX_NAME,
 ) -> PrimaryInstanceLock:
-    """名前付き mutex を取得し、自プロセスが primary かどうかを原子的に判定する。
+    """名前付き mutex を作成し、所有権(ホスト権)の獲得を非ブロッキングで試みる。
 
-    Windows 以外、または mutex 取得に失敗した場合は ``is_primary=True``
-    (フェイルオープン) を返し、従来どおり listen() ベースの調停に委ねる。
+    所有権を取れたプロセスが primary(ホスト)。Windows 以外、または mutex 作成に
+    失敗した場合は ``is_primary=True`` (フェイルオープン) を返し、従来どおり
+    listen() ベースの調停に委ねる。
     """
     if not sys.platform.startswith("win"):
         return PrimaryInstanceLock(True)
@@ -61,12 +100,13 @@ def acquire_primary_instance_lock(
             ctypes.c_wchar_p,
         ]
         handle = kernel32.CreateMutexW(None, False, name)
-        last_error = ctypes.get_last_error()
         if not handle:
-            log_message(f"CreateMutexW failed (err={last_error}); assuming primary instance.")
+            err = ctypes.get_last_error()
+            log_message(f"CreateMutexW failed (err={err}); assuming primary instance.")
             return PrimaryInstanceLock(True)
-        is_primary = last_error != _ERROR_ALREADY_EXISTS
-        return PrimaryInstanceLock(is_primary, handle)
+        lock = PrimaryInstanceLock(is_primary=False, handle=handle, kernel32=kernel32)
+        lock.try_become_primary(timeout_ms=0)
+        return lock
     except Exception as e:
         log_message(f"Primary-instance lock unavailable: {e!r}")
         return PrimaryInstanceLock(True)

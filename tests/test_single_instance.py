@@ -18,19 +18,28 @@ single_instance = importlib.import_module("wagom_player.single_instance")
 def test_primary_instance_lock_is_exclusive():
     name = f"wagom-player-test-lock-{uuid.uuid4()}"
 
-    # 最初の取得は primary。保持中の2つ目は primary になれない。
+    # 最初の取得は所有権を得て primary。
     first = single_instance.acquire_primary_instance_lock(name)
     try:
         assert first.is_primary
-        second = single_instance.acquire_primary_instance_lock(name)
-        try:
-            assert not second.is_primary
-        finally:
-            second.release()
+
+        # 別スレッド(=別オーナー。実環境の別プロセス相当)からは所有権を取れない。
+        # ※ 同一スレッドでの再取得は mutex の再入で成功してしまうためスレッドで分ける。
+        result = {}
+
+        def worker():
+            other = single_instance.acquire_primary_instance_lock(name)
+            result["is_primary"] = other.is_primary
+            other.release()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2)
+        assert result.get("is_primary") is False
     finally:
         first.release()
 
-    # 全て解放されたら、次の取得は再び primary になれる。
+    # 所有者が解放したら、次の取得は再び所有権を得られる。
     third = single_instance.acquire_primary_instance_lock(name)
     try:
         assert third.is_primary

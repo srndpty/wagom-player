@@ -50,25 +50,34 @@ def _configure_runtime_environment() -> None:
     log_message(f"PYTHON_VLC_LIB_PATH={os.environ.get('PYTHON_VLC_LIB_PATH', '')!r}")
 
 
-def _forward_to_primary(
+def _forward_or_take_over(
     initial_file: Optional[str],
+    lock,
     attempts: int = 20,
     interval_ms: int = 50,
 ) -> bool:
-    """primary プロセスへファイルを転送する。
+    """primary へ転送する。primary は mutex 取得直後でまだ IPC サーバを listen して
+    いないことがあるため、接続できるまで短くリトライする(最大 attempts*interval_ms ms)。
 
-    primary は mutex 取得直後でまだ IPC サーバを listen していないことがあるため、
-    接続できるまで短くリトライする(最大 attempts*interval_ms ミリ秒)。
+    リトライ中に primary が異常終了して mutex の所有権が解放された場合、二次プロセスの
+    うち 1 つだけが ``try_become_primary()`` で所有権を獲得し ``lock.is_primary`` が
+    True になる(=ホストを引き継ぐ)。所有権で直列化されるため、乗っ取り時もホストは
+    1 つだけになり、複数が listen() レースに戻ることはない。
+
+    戻り値: 転送できたら True。False の場合は ``lock.is_primary`` がホストを引き継いだ
+    かどうか(True ならホスト化、False なら諦め)を表す。
     """
     for _ in range(attempts):
         if send_to_existing_instance(initial_file):
             return True
+        if lock.try_become_primary():
+            return False
         time.sleep(interval_ms / 1000)
     return False
 
 
 def _claim_single_instance(initial_file: Optional[str]):
-    """primary かどうかを mutex で原子的に決め、転送するか IPC サーバを確保する。
+    """所有権ベースの mutex でホストを 1 つに選び、転送するか IPC サーバを確保する。
 
     返り値は ``(server, forwarded, lock)``。``lock`` はホストである限り保持し続ける
     必要があるため、呼び出し側がプロセス終了まで参照を維持する。
@@ -76,11 +85,17 @@ def _claim_single_instance(initial_file: Optional[str]):
     lock = acquire_primary_instance_lock()
     if not lock.is_primary:
         # 既存インスタンスが居る/起動中。listen 完了までリトライしつつ転送。
-        if _forward_to_primary(initial_file):
+        # primary が落ちたら、この中で所有権を取り直して 1 つだけが引き継ぐ。
+        if _forward_or_take_over(initial_file, lock):
             log_message("Existing wagom-player instance found. Forwarded request and exiting.")
             return None, True, lock
-        # 到達不能(primary が起動途中で落ちた等)。自分がホストを引き継ぐ。
-        log_message("Primary instance unreachable; taking over as primary instance.")
+        if lock.is_primary:
+            log_message("Primary instance exited; taking over as primary instance.")
+        else:
+            # 所有権を取れない(primary が生存したまま応答しない等)。listen() レースを
+            # 避けるため、ここではサーバを立てずに IPC 無しで続行する。
+            log_message("Primary instance unresponsive; continuing without IPC.")
+            return None, False, lock
 
     single_instance_server = create_single_instance_server(remove_stale=True)
     if single_instance_server is None:

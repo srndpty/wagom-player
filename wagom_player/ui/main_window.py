@@ -960,8 +960,18 @@ class VideoPlayer(QtWidgets.QMainWindow):
                 shuffle_enabled=self.shuffle_enabled,
                 media_length_ms=self._media_length,
                 filename=filename,
+                file_size_bytes=self._current_file_size_bytes(current_path),
             )
         )
+
+    def _current_file_size_bytes(self, current_path: str) -> int:
+        """現在のファイルサイズ(バイト)を返す。取得できない場合は -1。"""
+        if not current_path:
+            return -1
+        try:
+            return os.path.getsize(current_path)
+        except OSError:
+            return -1
 
     def _update_play_button(self) -> None:
         try:

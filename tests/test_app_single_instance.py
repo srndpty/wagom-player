@@ -102,9 +102,9 @@ def test_claim_single_instance_takes_over_when_primary_dies(monkeypatch):
     assert create_calls == [True]  # 引き継いだ 1 プロセスだけがホスト化
 
 
-def test_claim_single_instance_skips_server_when_takeover_fails(monkeypatch):
-    # 転送できず所有権も取れない(primary 生存だが応答なし)場合は listen() レースを
-    # 避けるためサーバを立てない。
+def test_claim_single_instance_exits_when_takeover_fails(monkeypatch):
+    # 転送できず所有権も取れない(primary 生存だが応答なし)場合は、別ウィンドウを
+    # 開かないよう終了扱いにする。
     lock = _FakeLock(is_primary=False, take_over_after=None)
     create_calls = []
 
@@ -123,7 +123,7 @@ def test_claim_single_instance_skips_server_when_takeover_fails(monkeypatch):
 
     server, forwarded, returned_lock = app_module._claim_single_instance("movie.mp4")
 
-    assert not forwarded
+    assert forwarded
     assert server is None
     assert returned_lock is lock
     assert not lock.is_primary

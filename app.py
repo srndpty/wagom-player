@@ -65,7 +65,7 @@ def _forward_or_take_over(
     1 つだけになり、複数が listen() レースに戻ることはない。
 
     戻り値: 転送できたら True。False の場合は ``lock.is_primary`` がホストを引き継いだ
-    かどうか(True ならホスト化、False なら諦め)を表す。
+    かどうか(True ならホスト化、False なら終了)を表す。
     """
     for _ in range(attempts):
         if send_to_existing_instance(initial_file):
@@ -111,10 +111,10 @@ def _claim_single_instance(initial_file: Optional[str]):
         if lock.is_primary:
             log_message("Primary instance exited; taking over as primary instance.")
         else:
-            # 所有権を取れない(primary が生存したまま応答しない等)。listen() レースを
-            # 避けるため、ここではサーバを立てずに IPC 無しで続行する。
-            log_message("Primary instance unresponsive; continuing without IPC.")
-            return None, False, lock
+            # 所有権を取れない(primary が生存したまま応答しない等)。このまま続行すると
+            # primary が生きたまま別ウィンドウを開くため、二次プロセスは終了する。
+            log_message("Primary instance unresponsive; exiting secondary instance.")
+            return None, True, lock
 
     single_instance_server = create_single_instance_server(remove_stale=True)
     if single_instance_server is None:

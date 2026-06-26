@@ -664,6 +664,7 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
     player.keyPressEvent(event)
     assert seeks == [player.SEEK_LONG_MS]
 
+    # 連打直後(スロットリング窓内)のオートリピートは無視される
     repeat_event = QtGui.QKeyEvent(
         QtCore.QEvent.KeyPress,
         QtCore.Qt.Key_4,
@@ -674,13 +675,18 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
     player.keyPressEvent(repeat_event)
     assert seeks == [player.SEEK_LONG_MS]
 
+    # 長押し継続でスロットリング窓を超えたオートリピートは連続シークとして受け付ける
+    player._last_keypad_seek_msec_by_key[int(QtCore.Qt.Key_4)] = 0
+    player.keyPressEvent(repeat_event)
+    assert seeks == [player.SEEK_LONG_MS, player.SEEK_LONG_MS]
+
     previous_event = QtGui.QKeyEvent(
         QtCore.QEvent.KeyPress,
         QtCore.Qt.Key_1,
         QtCore.Qt.KeypadModifier,
     )
     player.keyPressEvent(previous_event)
-    assert seeks == [player.SEEK_LONG_MS, -player.SEEK_LONG_MS]
+    assert seeks == [player.SEEK_LONG_MS, player.SEEK_LONG_MS, -player.SEEK_LONG_MS]
 
 
 def test_status_time_does_not_overwrite_priority_message(player):

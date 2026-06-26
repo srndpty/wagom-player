@@ -671,14 +671,14 @@ class VideoPlayer(QtWidgets.QMainWindow):
             if length > 0:
                 new_t = max(min(new_t, length - 1000), 0)
             self.vlc_player.set_time(new_t, context="seek_by_set_time", delta_ms=delta_ms)
-            self._show_overlay(f"[{self._format_ms(new_t)}]")
+            percent = int(round(new_t / length * 100)) if length > 0 else 0
+            self._show_overlay(f"[{self._format_ms(new_t)} ({percent}%)]")
         except Exception as e:
             diagnostics.record_exception("seek_by", e, delta_ms=delta_ms)
 
     def _should_ignore_keypad_seek(self, event: QtGui.QKeyEvent) -> bool:
-        if event.isAutoRepeat():
-            return True
-
+        # 長押し中のオートリピートも受け付ける(矢印キーと挙動を揃える)。連続入力が
+        # 速すぎないよう、キーごとに最小間隔でスロットリングするだけに留める。
         key = int(event.key())
         now = QtCore.QDateTime.currentMSecsSinceEpoch()
         last = self._last_keypad_seek_msec_by_key.get(key, 0)
@@ -849,8 +849,29 @@ class VideoPlayer(QtWidgets.QMainWindow):
         return format_ms(ms)
 
     def _show_overlay(self, text: str, duration_ms: int = 1500) -> None:
-        """オーバーレイラベルにテキストを表示し、一定時間後に非表示にする"""
+        """オーバーレイラベルにテキストを表示し、一定時間後に非表示にする。
+
+        オーバーレイは最前面固定の別ウィンドウのため、wagom-player が前面にいない
+        ときに表示すると Chrome などの上に被ってしまう。プレイヤーが実際に見えている
+        ときだけ表示する。
+        """
+        if not self._is_overlay_display_allowed():
+            return
         self.overlay.show(text, duration_ms)
+
+    def _is_overlay_display_allowed(self) -> bool:
+        """オーバーレイを表示してよい状態か(プレイヤーが前面に見えているか)を返す。"""
+        return self.isActiveWindow() and not self.isMinimized()
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:  # noqa: N802
+        """非アクティブ化・最小化したら、最前面オーバーレイを隠して他アプリへの被りを防ぐ。"""
+        super().changeEvent(event)
+        if event.type() in (
+            QtCore.QEvent.ActivationChange,
+            QtCore.QEvent.WindowStateChange,
+        ):
+            if not self._is_overlay_display_allowed():
+                self.overlay.hide()
 
     def _show_status_message(self, msg: str, timeout_ms: int) -> None:
         """タイムアウト付きステータスメッセージを表示し、その間タイマーの上書きを抑制する"""

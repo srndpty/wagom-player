@@ -122,6 +122,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.subtitle_enabled = False
         self.preferred_subtitle_language = self.DEFAULT_AUDIO_LANGUAGE
         self._pending_subtitle_apply = False
+        # play_at() ごとに採番し、優先トラック適用の遅延 callback が古い動画のものか
+        # 判定するための世代番号。切替直後に前動画のタイマーが新動画の pending を
+        # 確定させてしまう事故を防ぐ。
+        self._track_apply_generation = 0
+        # 右クリックコンテキストメニューの二重表示を抑制するためのデバウンス用。
+        self._last_context_menu_msec = 0
 
         # タイマー
         self.timer = QtCore.QTimer(self)
@@ -179,7 +185,6 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.volume_slider.clickedValue.connect(self._on_volume_clicked)
         self.video_frame.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.video_frame.customContextMenuRequested.connect(self._show_video_context_menu)
-        self.video_frame.installEventFilter(self)
 
         self._apply_control_icons()
 
@@ -263,20 +268,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _apply_control_icons(self) -> None:
         apply_control_icons(self)
 
-    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
-        if watched is self.video_frame:
-            if event.type() == QtCore.QEvent.ContextMenu:
-                context_event = event
-                self._show_video_context_menu(context_event.pos())  # type: ignore[attr-defined]
-                return True
-            if event.type() == QtCore.QEvent.MouseButtonRelease:
-                mouse_event = event
-                if mouse_event.button() == QtCore.Qt.RightButton:  # type: ignore[attr-defined]
-                    self._show_video_context_menu(mouse_event.pos())  # type: ignore[attr-defined]
-                    return True
-        return super().eventFilter(watched, event)
-
     def nativeEvent(self, event_type, message):  # noqa: N802
+        # ネイティブ VLC 子ウィンドウ上の右クリックは Qt の QContextMenuEvent として
+        # video_frame に届かないことがあるため、WM_CONTEXTMENU を直接拾う。Qt 側の
+        # CustomContextMenu signal と二重に発火し得るので、_show_video_context_menu()
+        # 側のデバウンスで一方だけがメニューを開くようにしている。
         if sys.platform.startswith("win") and self._is_windows_context_menu_event(message):
             global_pos = QtGui.QCursor.pos()
             local_pos = self.video_frame.mapFromGlobal(global_pos)
@@ -459,8 +455,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
             vlc.EventType.MediaPlayerEndReached,
             lambda event, gen=generation: self._on_vlc_end_for_generation(event, gen),
         )
+        em.event_attach(
+            vlc.EventType.MediaPlayerPlaying,
+            lambda event, gen=generation: self._on_vlc_playing_for_generation(event, gen),
+        )
         if not self._vlc_events_signal_connected:
             self.vlc_events.media_ended.connect(self._on_media_end)
+            self.vlc_events.media_playing.connect(self._on_media_playing)
             self._vlc_events_signal_connected = True
 
     def _create_fresh_vlc_player(self) -> None:
@@ -483,6 +484,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _on_vlc_end(self, event) -> None:
         log_message(f"_on_vlc_end(): VLC EndReached fired, current_index={self.current_index}")
         self.vlc_events.media_ended.emit()
+
+    def _on_vlc_playing_for_generation(self, event, generation: int) -> None:
+        # VLC スレッドから呼ばれるため、Qt/VLC 操作はメインスレッドへ marshal する。
+        if generation != self._vlc_generation:
+            return
+        self.vlc_events.media_playing.emit()
+
+    def _on_media_playing(self) -> None:
+        # 入力が有効化（Playing 到達）した時点で、現在の世代の pending を適用する。
+        self._apply_preferred_tracks_if_pending(self._track_apply_generation)
 
     def _on_media_end(self) -> None:
         log_message(
@@ -705,6 +716,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # ------------- 音声トラック -------------
     def _show_video_context_menu(self, pos: QtCore.QPoint) -> None:
+        # 右クリック1回で Qt の CustomContextMenu signal とネイティブ WM_CONTEXTMENU の
+        # 両経路が発火し得る。短時間の重複呼び出しは無視し、メニューが二重に開かないようにする。
+        now_msec = QtCore.QDateTime.currentMSecsSinceEpoch()
+        if now_msec - self._last_context_menu_msec < 250:
+            return
+        self._last_context_menu_msec = now_msec
+
         menu = QtWidgets.QMenu(self)
         menu.addAction("再生 / 一時停止").triggered.connect(self.toggle_play)
         menu.addAction("停止").triggered.connect(self.stop)
@@ -757,6 +775,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self._show_status_message("音声トラックの切替に失敗しました", 3000)
             return
 
+        # 手動選択が成功した時点で pending を確実に落とす。表示名から言語を取り出せない
+        # トラック（"Commentary" 等）でも、残存タイマーが優先言語で上書きするのを防ぐ。
+        self._pending_audio_language_apply = False
+
         language = self._audio_track_language_key(name)
         if language:
             self.preferred_audio_language = language
@@ -768,10 +790,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def _schedule_preferred_track_apply(self) -> None:
         self._pending_audio_language_apply = True
         self._pending_subtitle_apply = True
+        # この play_at に紐づく世代を採番。遅延 callback はこの世代を捕捉し、別の動画へ
+        # 切り替わった後に発火しても何もしないようにする。Playing イベントも起点になる。
+        generation = self._track_apply_generation = self._track_apply_generation + 1
         for delay_ms in (150, 500, 1200):
-            QtCore.QTimer.singleShot(delay_ms, self._apply_preferred_tracks_if_pending)
+            QtCore.QTimer.singleShot(
+                delay_ms,
+                lambda gen=generation: self._apply_preferred_tracks_if_pending(gen),
+            )
 
-    def _apply_preferred_tracks_if_pending(self) -> None:
+    def _apply_preferred_tracks_if_pending(self, generation: Optional[int] = None) -> None:
+        # 別の動画へ切り替わった後の古い callback なら何もしない。
+        if generation is not None and generation != self._track_apply_generation:
+            return
         if self._pending_audio_language_apply and self._apply_preferred_audio_track(
             show_message=False
         ):
@@ -781,14 +812,30 @@ class VideoPlayer(QtWidgets.QMainWindow):
         ):
             self._pending_subtitle_apply = False
 
+    def _is_media_ready_for_tracks(self) -> bool:
+        """メディアの入力が確定し、トラック操作が意味を持つ状態かを返す。
+
+        ``audio_get_track()`` / ``video_get_spu()`` は入力未確定時にも ``-1`` を返すため、
+        それらの値だけでは「確定済みでオフ」と「未確定」を区別できない。再生中であるか、
+        長さが取得できていることをもって確定済みとみなす。
+        """
+        if self.vlc_player.is_playing():
+            return True
+        return self.vlc_player.get_length() > 0
+
     def _apply_preferred_audio_track(self, show_message: bool) -> bool:
         language = self._normalize_audio_language(self.preferred_audio_language)
         if not language:
             return True
 
+        # トラック一覧が空＝まだ入力未確定。pending を維持して後続の試行に委ねる。
+        if not self._audio_tracks():
+            return False
+
         match = self._find_audio_track_for_language(language)
         if match is None:
-            return False
+            # 入力は確定済みだが該当言語が無い。これ以上の再試行は無意味なので確定扱い。
+            return True
 
         track_id, name = match
         current_track_id = self.vlc_player.audio_get_track()
@@ -876,6 +923,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self._show_status_message("字幕の切替に失敗しました", 3000)
             return
 
+        # 手動選択が成功した時点で pending を確実に落とす。残存タイマーによる上書きを防ぐ。
+        self._pending_subtitle_apply = False
+
         if spu_id < 0:
             self.subtitle_enabled = False
             self.settings_store.set_value("subtitle_enabled", False)
@@ -894,16 +944,23 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._show_overlay(f"[字幕: {display_name}]")
 
     def _apply_preferred_subtitle_track(self, show_message: bool) -> bool:
+        # 入力未確定のうちは何もできない。pending を維持して後続の試行に委ねる。
+        if not self._is_media_ready_for_tracks():
+            return False
+
         if not self.subtitle_enabled:
-            current_spu = self.vlc_player.video_get_spu()
-            if current_spu < 0:
-                return True
-            return self.vlc_player.video_set_spu(-1, context="apply_subtitle_off")
+            # 現在 -1 でも「成功」とは扱わない。VLC の初期トラック選択が後から字幕を有効に
+            # することがあるため、確定後の各試行で明示的にオフを指示し続ける。pending を
+            # 落とさない（False を返す）ことで、最後の試行まで -1 を強制する。
+            self.vlc_player.video_set_spu(-1, context="apply_subtitle_off")
+            return False
 
         language = self._normalize_audio_language(self.preferred_subtitle_language)
         match = self._find_subtitle_track_for_language(language)
         if match is None:
-            return False
+            # 字幕トラックが既に存在するのに該当言語が無ければ確定扱い。まだ字幕トラックが
+            # 出そろっていない可能性があるなら pending を維持して再試行する。
+            return self._has_real_subtitle_tracks()
 
         spu_id, name = match
         current_spu = self.vlc_player.video_get_spu()
@@ -925,6 +982,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
             if spu_id >= 0 and self._audio_track_language_key(name) == language:
                 return (spu_id, name)
         return None
+
+    def _has_real_subtitle_tracks(self) -> bool:
+        """「オフ」を除いた実体のある字幕トラックが存在するかを返す。"""
+        return any(spu_id >= 0 for spu_id, _name in self._subtitle_tracks())
 
     def _get_current_playlist(self) -> list[str]:
         """現在の再生モードに応じたプレイリストを返すヘルパーメソッド"""

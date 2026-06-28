@@ -150,6 +150,7 @@ class FakeInstance:
 class FakeVlc:
     class EventType:
         MediaPlayerEndReached = "ended"
+        MediaPlayerPlaying = "playing"
 
     class State:
         Stopped = "Stopped"

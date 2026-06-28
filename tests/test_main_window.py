@@ -8,6 +8,7 @@ from wagom_player.infrastructure.trash import TrashService
 
 QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
+QtWidgets = pytest.importorskip("PyQt5.QtWidgets", exc_type=ImportError)
 
 main_window = importlib.import_module("wagom_player.ui.main_window")
 
@@ -47,8 +48,9 @@ def test_create_vlc_instance_passes_plugin_path(monkeypatch, tmp_path):
 def test_video_player_initializes_ui_and_vlc_events(player):
     assert player.windowTitle() == "wagom-player"
     assert player.volume_slider.value() == 80
-    assert len(player.player.events.attached) == 1
-    assert player.player.events.attached[0][0] == "ended"
+    assert len(player.player.events.attached) == 2
+    attached_event_types = [event_type for event_type, _callback in player.player.events.attached]
+    assert attached_event_types == ["ended", "playing"]
     assert player.btn_repeat.isCheckable()
     assert player.btn_shuffle.isCheckable()
 
@@ -67,7 +69,7 @@ def test_create_fresh_vlc_player_rebinds_video_surface(player):
     player._create_fresh_vlc_player()
 
     assert player.player.surface is not None
-    assert len(player.player.events.attached) == 1
+    assert len(player.player.events.attached) == 2
 
 
 def test_stale_vlc_event_callback_is_ignored_after_fresh_player(player, monkeypatch):
@@ -178,6 +180,191 @@ def test_playback_controls_seek_rate_volume_and_mute(player):
     assert player.volume_slider.value() == 100
     player._toggle_mute()
     assert player._muted
+
+
+def test_preferred_audio_language_defaults_to_japanese(player):
+    player.player.audio_track_descriptions = [
+        (1, "Track 1 - English"),
+        (2, "Track 2 - Japanese"),
+    ]
+    player.player.audio_track = 1
+
+    assert player.preferred_audio_language == "ja"
+    assert player._apply_preferred_audio_track(show_message=False)
+
+    assert player.player.audio_track == 2
+
+
+def test_select_audio_track_saves_language_preference(player):
+    player.player.audio_track_descriptions = [
+        (1, "Track 1 - Japanese"),
+        (2, "Track 2 - English"),
+    ]
+
+    player._select_audio_track(2, "Track 2 - English")
+
+    assert player.player.audio_track == 2
+    assert player.preferred_audio_language == "en"
+    assert player.settings.value("preferred_audio_language") == "en"
+
+
+def test_saved_audio_language_applies_to_next_matching_track(player):
+    player._select_audio_track(2, "English")
+    player.player.audio_track_descriptions = [
+        (3, "日本語"),
+        (4, "English Commentary"),
+    ]
+    player.player.audio_track = 3
+
+    assert player._apply_preferred_audio_track(show_message=False)
+
+    assert player.player.audio_track == 4
+
+
+def test_audio_track_menu_lists_tracks_and_marks_current(player):
+    player.player.audio_track_descriptions = [(1, "English"), (2, "Japanese")]
+    player.player.audio_track = 2
+    menu = QtWidgets.QMenu()
+
+    player._populate_audio_track_menu(menu)
+
+    actions = menu.actions()
+    assert [action.text() for action in actions] == ["English", "Japanese"]
+    assert [action.isChecked() for action in actions] == [False, True]
+
+
+def test_select_subtitle_track_saves_enabled_language_preference(player):
+    player.player.spu_descriptions = [(-1, "Disable"), (3, "Japanese"), (4, "English")]
+
+    player._select_subtitle_track(3, "Japanese")
+
+    assert player.player.spu == 3
+    assert player.subtitle_enabled
+    assert player.preferred_subtitle_language == "ja"
+    assert player.settings.value("subtitle_enabled", type=bool)
+    assert player.settings.value("preferred_subtitle_language") == "ja"
+
+
+def test_select_subtitle_off_saves_disabled_state(player):
+    player.player.spu = 4
+
+    player._select_subtitle_track(-1, "Disable")
+
+    assert player.player.spu == -1
+    assert not player.subtitle_enabled
+    assert not player.settings.value("subtitle_enabled", type=bool)
+
+
+def test_saved_subtitle_language_applies_when_enabled(player):
+    player._select_subtitle_track(4, "English")
+    player.player.spu_descriptions = [(-1, "Disable"), (8, "日本語"), (9, "English SDH")]
+    player.player.spu = -1
+
+    assert player._apply_preferred_subtitle_track(show_message=False)
+
+    assert player.player.spu == 9
+
+
+def test_subtitle_menu_lists_off_and_tracks(player):
+    player.player.spu_descriptions = [(-1, "Disable"), (3, "English"), (4, "Japanese")]
+    player.player.spu = -1
+    menu = QtWidgets.QMenu()
+
+    player._populate_subtitle_track_menu(menu)
+
+    actions = menu.actions()
+    assert [action.text() for action in actions] == ["オフ", "English", "Japanese"]
+    assert [action.isChecked() for action in actions] == [True, False, False]
+
+
+def test_video_context_menu_opens_once_for_duplicate_triggers(player, monkeypatch):
+    exec_calls = []
+
+    def _fake_exec(self, *args, **kwargs):
+        exec_calls.append(1)
+
+    monkeypatch.setattr(QtWidgets.QMenu, "exec_", _fake_exec)
+    pos = QtCore.QPoint(0, 0)
+
+    # Qt の CustomContextMenu signal とネイティブ WM_CONTEXTMENU が二重発火する状況を模す。
+    player.video_frame.customContextMenuRequested.emit(pos)
+    player._show_video_context_menu(pos)
+
+    assert len(exec_calls) == 1
+
+
+def test_subtitle_off_is_reasserted_after_vlc_autoselect(player):
+    player.subtitle_enabled = False
+    player.player.spu_descriptions = [(-1, "Disable"), (3, "Japanese")]
+    player.player.spu = -1
+    player._pending_subtitle_apply = True
+
+    # 初回試行: 既に -1 でも「成功」扱いで pending を落とさない。
+    player._apply_preferred_tracks_if_pending()
+    assert player.player.spu == -1
+    assert player._pending_subtitle_apply
+
+    # VLC の初期トラック選択が後から字幕を有効化する状況を再現。
+    player.player.spu = 3
+
+    # 後続試行で明示的にオフへ戻す。
+    player._apply_preferred_tracks_if_pending()
+    assert player.player.spu == -1
+
+
+def test_stale_track_apply_callback_does_not_clear_new_pending(player):
+    player._schedule_preferred_track_apply()  # 動画 A
+    generation_a = player._track_apply_generation
+    player._schedule_preferred_track_apply()  # 動画 B（新しい世代）
+
+    player._pending_audio_language_apply = True
+    player._pending_subtitle_apply = True
+
+    # 動画 A の遅延 callback が発火しても、動画 B の pending を確定させない。
+    player._apply_preferred_tracks_if_pending(generation_a)
+
+    assert player._pending_audio_language_apply
+    assert player._pending_subtitle_apply
+
+
+def test_manual_audio_selection_not_overridden_by_pending_apply(player):
+    player.preferred_audio_language = "ja"
+    player._pending_audio_language_apply = True
+    player.player.audio_track_descriptions = [(1, "日本語"), (2, "Commentary")]
+    player.player.audio_track = 1
+
+    # 言語を取り出せない表示名を手動選択する。
+    player._select_audio_track(2, "Commentary")
+
+    assert player.player.audio_track == 2
+    assert player.preferred_audio_language == "ja"  # 言語推定できないので preference は不変
+    assert not player._pending_audio_language_apply
+
+    # 残存タイマー相当の適用を呼んでも、手動選択が維持される。
+    player._apply_preferred_tracks_if_pending()
+    assert player.player.audio_track == 2
+
+
+def test_manual_subtitle_selection_not_overridden_by_pending_apply(player):
+    player.subtitle_enabled = True
+    player.preferred_subtitle_language = "ja"
+    player._pending_subtitle_apply = True
+    player.player.spu_descriptions = [(-1, "Disable"), (3, "日本語"), (4, "Commentary")]
+    player.player.spu = 3
+
+    player._select_subtitle_track(4, "Commentary")
+
+    assert player.player.spu == 4
+    assert not player._pending_subtitle_apply
+
+    player._apply_preferred_tracks_if_pending()
+    assert player.player.spu == 4
+
+
+def test_menu_bar_contains_common_player_menus(player):
+    titles = [action.text() for action in player.menuBar().actions()]
+
+    assert titles == ["ファイル", "再生", "音声", "字幕", "表示", "ツール", "ヘルプ"]
 
 
 def test_status_time_updates_slider_warning_and_snapshot(player):

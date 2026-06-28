@@ -13,6 +13,7 @@ except (FileNotFoundError, ImportError, OSError):
 
 class VlcEvents(QtCore.QObject):
     media_ended = QtCore.pyqtSignal()
+    media_playing = QtCore.pyqtSignal()
 
 
 def create_vlc_instance() -> Any:

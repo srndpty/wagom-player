@@ -129,3 +129,79 @@ class VlcPlayerAdapter:
         return self._ok_unless_false_or_minus_one(
             self.call(context, self._player.audio_toggle_mute, default=-1)
         )
+
+    def audio_get_track(self, default: int = -1) -> int:
+        value = self.call("vlc_audio_get_track", self._player.audio_get_track, default=default)
+        return self._to_int("vlc_audio_get_track_convert", value, default)
+
+    def audio_set_track(self, value: int, context: str = "vlc_audio_set_track") -> bool:
+        return self._ok_unless_false_or_minus_one(
+            self.call(
+                context,
+                lambda: self._player.audio_set_track(value),
+                default=-1,
+                track_id=value,
+            )
+        )
+
+    def audio_get_track_description(self) -> list[tuple[int, str]]:
+        descriptions = self.call(
+            "vlc_audio_get_track_description",
+            self._player.audio_get_track_description,
+            default=[],
+        )
+        if not descriptions:
+            return []
+
+        result: list[tuple[int, str]] = []
+        for item in descriptions:
+            try:
+                track_id, name = item
+                if isinstance(name, bytes):
+                    name = name.decode("utf-8", errors="replace")
+                result.append((int(track_id), str(name)))
+            except (TypeError, ValueError) as e:
+                diagnostics.record_exception(
+                    "vlc_audio_track_description_convert",
+                    e,
+                    value=repr(item),
+                )
+        return result
+
+    def video_get_spu(self, default: int = -1) -> int:
+        value = self.call("vlc_video_get_spu", self._player.video_get_spu, default=default)
+        return self._to_int("vlc_video_get_spu_convert", value, default)
+
+    def video_set_spu(self, value: int, context: str = "vlc_video_set_spu") -> bool:
+        return self._ok_unless_false_or_minus_one(
+            self.call(
+                context,
+                lambda: self._player.video_set_spu(value),
+                default=-1,
+                spu_id=value,
+            )
+        )
+
+    def video_get_spu_description(self) -> list[tuple[int, str]]:
+        descriptions = self.call(
+            "vlc_video_get_spu_description",
+            self._player.video_get_spu_description,
+            default=[],
+        )
+        if not descriptions:
+            return []
+
+        result: list[tuple[int, str]] = []
+        for item in descriptions:
+            try:
+                spu_id, name = item
+                if isinstance(name, bytes):
+                    name = name.decode("utf-8", errors="replace")
+                result.append((int(spu_id), str(name)))
+            except (TypeError, ValueError) as e:
+                diagnostics.record_exception(
+                    "vlc_video_spu_description_convert",
+                    e,
+                    value=repr(item),
+                )
+        return result

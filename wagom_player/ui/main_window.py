@@ -412,9 +412,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             type=str,
         )
         self.preferred_audio_language = self._normalize_audio_language(language)
-        self.subtitle_enabled = bool(
-            self.settings.value("subtitle_enabled", False, type=bool)
-        )
+        self.subtitle_enabled = bool(self.settings.value("subtitle_enabled", False, type=bool))
         subtitle_language = self.settings.value(
             "preferred_subtitle_language",
             self.DEFAULT_AUDIO_LANGUAGE,

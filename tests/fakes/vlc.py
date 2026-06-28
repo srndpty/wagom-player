@@ -37,6 +37,10 @@ class FakePlayer:
         self.stopped = 0
         self.played = 0
         self.surface = None
+        self.audio_track = 1
+        self.audio_track_descriptions = [(1, "English"), (2, "Japanese")]
+        self.spu = -1
+        self.spu_descriptions = [(-1, "Disable"), (3, "English"), (4, "Japanese")]
 
     def event_manager(self):
         return self.events
@@ -52,6 +56,30 @@ class FakePlayer:
 
     def audio_toggle_mute(self):
         self.muted = not self.muted
+
+    def audio_get_track(self):
+        return self.audio_track
+
+    def audio_set_track(self, value):
+        if value not in [track_id for track_id, _name in self.audio_track_descriptions]:
+            return -1
+        self.audio_track = value
+        return 0
+
+    def audio_get_track_description(self):
+        return self.audio_track_descriptions
+
+    def video_get_spu(self):
+        return self.spu
+
+    def video_set_spu(self, value):
+        if value not in [spu_id for spu_id, _name in self.spu_descriptions]:
+            return -1
+        self.spu = value
+        return 0
+
+    def video_get_spu_description(self):
+        return self.spu_descriptions
 
     def set_rate(self, value):
         self.rate = value

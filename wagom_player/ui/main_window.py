@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import threading
 from typing import Optional
@@ -56,6 +57,19 @@ def _create_vlc_instance() -> "vlc.Instance":
 class VideoPlayer(QtWidgets.QMainWindow):
     SEEK_SHORT_MS = 10_000
     SEEK_LONG_MS = 60_000
+    DEFAULT_AUDIO_LANGUAGE = "ja"
+    AUDIO_LANGUAGE_ALIASES = {
+        "ja": ("ja", "jpn", "jp", "japanese", "japan", "日本語", "日本", "日語"),
+        "en": ("en", "eng", "english", "英語"),
+        "ko": ("ko", "kor", "korean", "韓国語", "朝鮮語"),
+        "zh": ("zh", "chi", "zho", "cn", "chinese", "mandarin", "中国語", "中文"),
+        "fr": ("fr", "fre", "fra", "french", "フランス語"),
+        "de": ("de", "ger", "deu", "german", "ドイツ語"),
+        "es": ("es", "spa", "spanish", "スペイン語"),
+        "it": ("it", "ita", "italian", "イタリア語"),
+        "pt": ("pt", "por", "portuguese", "ポルトガル語"),
+        "ru": ("ru", "rus", "russian", "ロシア語"),
+    }
 
     def __init__(self, file: Optional[str] = None):
         super().__init__()
@@ -103,6 +117,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.current_index: int = -1
         self._last_external_file_path: str = ""
         self._last_external_file_msec: int = 0
+        self.preferred_audio_language = self.DEFAULT_AUDIO_LANGUAGE
+        self._pending_audio_language_apply = False
+        self.subtitle_enabled = False
+        self.preferred_subtitle_language = self.DEFAULT_AUDIO_LANGUAGE
+        self._pending_subtitle_apply = False
 
         # タイマー
         self.timer = QtCore.QTimer(self)
@@ -158,29 +177,122 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.seek_slider.clickedValue.connect(self._on_slider_clicked)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         self.volume_slider.clickedValue.connect(self._on_volume_clicked)
+        self.video_frame.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.video_frame.customContextMenuRequested.connect(self._show_video_context_menu)
+        self.video_frame.installEventFilter(self)
 
         self._apply_control_icons()
 
-        menu = self.menuBar().addMenu("ファイル")
-        act_open = menu.addAction("開く...")
+        self._build_menus()
+
+        # ドロップ
+        self.setAcceptDrops(True)
+
+    def _build_menus(self) -> None:
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("ファイル")
+        act_open = file_menu.addAction("開く...")
         act_open.setShortcut("Ctrl+O")
         act_open.triggered.connect(self.open_files_dialog)
-        act_copy_filename = menu.addAction("現在のファイル名をコピー")
+        act_copy_filename = file_menu.addAction("現在のファイル名をコピー")
         act_copy_filename.setShortcut("Ctrl+C")
         act_copy_filename.setShortcutContext(QtCore.Qt.ApplicationShortcut)
         act_copy_filename.triggered.connect(self.copy_current_filename_to_clipboard)
+        file_menu.addSeparator()
+        file_menu.addAction("_ok フォルダへ移動して次を再生").triggered.connect(
+            lambda: self._move_current_file_and_play_next("_ok")
+        )
+        file_menu.addAction("_ng フォルダへ移動して次を再生").triggered.connect(
+            lambda: self._move_current_file_and_play_next("_ng")
+        )
+        file_menu.addSeparator()
+        file_menu.addAction("終了").triggered.connect(self.close)
 
-        help_menu = self.menuBar().addMenu("ヘルプ")
+        playback_menu = menu_bar.addMenu("再生")
+        playback_menu.addAction("再生 / 一時停止").triggered.connect(self.toggle_play)
+        playback_menu.addAction("停止").triggered.connect(self.stop)
+        playback_menu.addSeparator()
+        playback_menu.addAction("前の動画へ").triggered.connect(self.play_previous)
+        playback_menu.addAction("次の動画へ").triggered.connect(self.play_next)
+        playback_menu.addSeparator()
+        playback_menu.addAction("10秒戻る").triggered.connect(
+            lambda: self.seek_by(-self.SEEK_SHORT_MS)
+        )
+        playback_menu.addAction("10秒進む").triggered.connect(
+            lambda: self.seek_by(self.SEEK_SHORT_MS)
+        )
+        playback_menu.addSeparator()
+        playback_menu.addAction("再生速度を下げる").triggered.connect(
+            lambda: self._change_playback_rate(-0.1)
+        )
+        playback_menu.addAction("再生速度を上げる").triggered.connect(
+            lambda: self._change_playback_rate(+0.1)
+        )
+        playback_menu.addSeparator()
+        self.act_repeat = playback_menu.addAction("リピート再生")
+        self.act_repeat.setCheckable(True)
+        self.act_repeat.triggered.connect(lambda _checked=False: self.btn_repeat.toggle())
+        self.act_shuffle = playback_menu.addAction("シャッフル再生")
+        self.act_shuffle.setCheckable(True)
+        self.act_shuffle.triggered.connect(lambda _checked=False: self.btn_shuffle.toggle())
+        playback_menu.aboutToShow.connect(self._sync_playback_menu_state)
+
+        self.audio_menu = menu_bar.addMenu("音声")
+        self.audio_menu.aboutToShow.connect(self._rebuild_audio_menu)
+
+        self.subtitle_menu = menu_bar.addMenu("字幕")
+        self.subtitle_menu.aboutToShow.connect(self._rebuild_subtitle_menu)
+
+        view_menu = menu_bar.addMenu("表示")
+        view_menu.addAction("最大化").triggered.connect(self.showMaximized)
+
+        tools_menu = menu_bar.addMenu("ツール")
+        tools_menu.addAction("メディア情報").triggered.connect(self._show_metadata_dialog)
+
+        help_menu = menu_bar.addMenu("ヘルプ")
         act_shortcuts = help_menu.addAction("ショートカット一覧")
         act_shortcuts.setShortcut("F1")
         act_shortcuts.setShortcutContext(QtCore.Qt.ApplicationShortcut)
         act_shortcuts.triggered.connect(self._show_shortcut_list_dialog)
 
-        # ドロップ
-        self.setAcceptDrops(True)
+    def _sync_playback_menu_state(self) -> None:
+        self.act_repeat.setChecked(self.repeat_enabled)
+        self.act_shuffle.setChecked(self.shuffle_enabled)
 
     def _apply_control_icons(self) -> None:
         apply_control_icons(self)
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
+        if watched is self.video_frame:
+            if event.type() == QtCore.QEvent.ContextMenu:
+                context_event = event
+                self._show_video_context_menu(context_event.pos())  # type: ignore[attr-defined]
+                return True
+            if event.type() == QtCore.QEvent.MouseButtonRelease:
+                mouse_event = event
+                if mouse_event.button() == QtCore.Qt.RightButton:  # type: ignore[attr-defined]
+                    self._show_video_context_menu(mouse_event.pos())  # type: ignore[attr-defined]
+                    return True
+        return super().eventFilter(watched, event)
+
+    def nativeEvent(self, event_type, message):  # noqa: N802
+        if sys.platform.startswith("win") and self._is_windows_context_menu_event(message):
+            global_pos = QtGui.QCursor.pos()
+            local_pos = self.video_frame.mapFromGlobal(global_pos)
+            if self.video_frame.rect().contains(local_pos):
+                self._show_video_context_menu(local_pos)
+                return True, 0
+        return super().nativeEvent(event_type, message)
+
+    def _is_windows_context_menu_event(self, message) -> bool:
+        try:
+            from ctypes import wintypes
+
+            msg = wintypes.MSG.from_address(int(message))
+            return msg.message == 0x007B  # WM_CONTEXTMENU
+        except Exception:
+            return False
 
     # タイトルバーのダーク化（Windows）
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802
@@ -298,12 +410,37 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.repeat_enabled = repeat
         self._update_repeat_button()
 
+        language = self.settings.value(
+            "preferred_audio_language",
+            self.DEFAULT_AUDIO_LANGUAGE,
+            type=str,
+        )
+        self.preferred_audio_language = self._normalize_audio_language(language)
+        self.subtitle_enabled = bool(
+            self.settings.value("subtitle_enabled", False, type=bool)
+        )
+        subtitle_language = self.settings.value(
+            "preferred_subtitle_language",
+            self.DEFAULT_AUDIO_LANGUAGE,
+            type=str,
+        )
+        self.preferred_subtitle_language = self._normalize_audio_language(subtitle_language)
+
     def _save_settings(self) -> None:
         def _save() -> None:
             self.settings_store.set_value("volume", int(self.volume_slider.value()))
             self.settings_store.set_value("geometry", self.saveGeometry())
             self.settings_store.set_value("isMaximized", self.isMaximized())
             self.settings_store.set_value("repeat", bool(self.repeat_enabled))
+            self.settings_store.set_value(
+                "preferred_audio_language",
+                self.preferred_audio_language,
+            )
+            self.settings_store.set_value("subtitle_enabled", bool(self.subtitle_enabled))
+            self.settings_store.set_value(
+                "preferred_subtitle_language",
+                self.preferred_subtitle_language,
+            )
 
         diagnostics.run_safely("save_settings", _save)
 
@@ -539,6 +676,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             diagnostics.record_breadcrumb("play_at_before_player_play", path=path)
             self.vlc_player.play(context="play_at_player_play", path=path)
+            self._schedule_preferred_track_apply()
             diagnostics.record_breadcrumb("play_at_after_player_play", path=path)
             log_message(
                 f"play_at(): player.play() done, current_index={self.current_index}, path={path}"
@@ -564,6 +702,229 @@ class VideoPlayer(QtWidgets.QMainWindow):
             log_message("play_at(): end")
         finally:
             self._is_changing_media = False
+
+    # ------------- 音声トラック -------------
+    def _show_video_context_menu(self, pos: QtCore.QPoint) -> None:
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("再生 / 一時停止").triggered.connect(self.toggle_play)
+        menu.addAction("停止").triggered.connect(self.stop)
+        menu.addSeparator()
+        audio_menu = menu.addMenu("音声トラック")
+        self._populate_audio_track_menu(audio_menu)
+        subtitle_menu = menu.addMenu("字幕")
+        self._populate_subtitle_track_menu(subtitle_menu)
+        menu.exec_(self.video_frame.mapToGlobal(pos))
+
+    def _rebuild_audio_menu(self) -> None:
+        self.audio_menu.clear()
+        self.audio_menu.addAction("ミュート切替").triggered.connect(self._toggle_mute)
+        self.audio_menu.addAction("音量を上げる").triggered.connect(
+            lambda: self._adjust_volume(+10)
+        )
+        self.audio_menu.addAction("音量を下げる").triggered.connect(
+            lambda: self._adjust_volume(-10)
+        )
+        self.audio_menu.addSeparator()
+        self._populate_audio_track_menu(self.audio_menu)
+
+    def _populate_audio_track_menu(self, menu: QtWidgets.QMenu) -> None:
+        tracks = self._audio_tracks()
+        if not tracks:
+            action = menu.addAction("音声トラックなし")
+            action.setEnabled(False)
+            return
+
+        current_track_id = self.vlc_player.audio_get_track()
+        for track_id, name in tracks:
+            action = menu.addAction(self._audio_track_display_name(track_id, name))
+            action.setCheckable(True)
+            action.setChecked(track_id == current_track_id)
+            action.triggered.connect(
+                lambda _checked=False, tid=track_id, label=name: self._select_audio_track(
+                    tid,
+                    label,
+                )
+            )
+
+    def _audio_tracks(self) -> list[tuple[int, str]]:
+        return self.vlc_player.audio_get_track_description()
+
+    def _audio_track_display_name(self, track_id: int, name: str) -> str:
+        return name or f"Track {track_id}"
+
+    def _select_audio_track(self, track_id: int, name: str) -> None:
+        if not self.vlc_player.audio_set_track(track_id, context="select_audio_track"):
+            self._show_status_message("音声トラックの切替に失敗しました", 3000)
+            return
+
+        language = self._audio_track_language_key(name)
+        if language:
+            self.preferred_audio_language = language
+            self.settings_store.set_value("preferred_audio_language", language)
+        display_name = self._audio_track_display_name(track_id, name)
+        self._show_status_message(f"音声トラック: {display_name}", 3000)
+        self._show_overlay(f"[音声: {display_name}]")
+
+    def _schedule_preferred_track_apply(self) -> None:
+        self._pending_audio_language_apply = True
+        self._pending_subtitle_apply = True
+        for delay_ms in (150, 500, 1200):
+            QtCore.QTimer.singleShot(delay_ms, self._apply_preferred_tracks_if_pending)
+
+    def _apply_preferred_tracks_if_pending(self) -> None:
+        if self._pending_audio_language_apply and self._apply_preferred_audio_track(
+            show_message=False
+        ):
+            self._pending_audio_language_apply = False
+        if self._pending_subtitle_apply and self._apply_preferred_subtitle_track(
+            show_message=False
+        ):
+            self._pending_subtitle_apply = False
+
+    def _apply_preferred_audio_track(self, show_message: bool) -> bool:
+        language = self._normalize_audio_language(self.preferred_audio_language)
+        if not language:
+            return True
+
+        match = self._find_audio_track_for_language(language)
+        if match is None:
+            return False
+
+        track_id, name = match
+        current_track_id = self.vlc_player.audio_get_track()
+        if current_track_id == track_id:
+            return True
+
+        if not self.vlc_player.audio_set_track(track_id, context="apply_preferred_audio_track"):
+            return False
+
+        if show_message:
+            self._show_status_message(
+                f"音声トラック: {self._audio_track_display_name(track_id, name)}",
+                3000,
+            )
+        return True
+
+    def _find_audio_track_for_language(self, language: str) -> Optional[tuple[int, str]]:
+        for track_id, name in self._audio_tracks():
+            if self._audio_track_language_key(name) == language:
+                return (track_id, name)
+        return None
+
+    def _normalize_audio_language(self, value: object) -> str:
+        text = str(value or "").strip().lower().replace("_", "-")
+        if not text:
+            return self.DEFAULT_AUDIO_LANGUAGE
+        for language, aliases in self.AUDIO_LANGUAGE_ALIASES.items():
+            if text == language or text in aliases:
+                return language
+        return text.split("-", 1)[0]
+
+    def _audio_track_language_key(self, name: str) -> str:
+        text = str(name or "").casefold()
+        tokens = set(re.findall(r"[a-z0-9]+", text))
+        for language, aliases in self.AUDIO_LANGUAGE_ALIASES.items():
+            for alias in aliases:
+                normalized_alias = alias.casefold()
+                if re.search(r"[a-z0-9]", normalized_alias):
+                    if normalized_alias in tokens:
+                        return language
+                elif normalized_alias in text:
+                    return language
+        return ""
+
+    # ------------- 字幕トラック -------------
+    def _rebuild_subtitle_menu(self) -> None:
+        self.subtitle_menu.clear()
+        self._populate_subtitle_track_menu(self.subtitle_menu)
+
+    def _populate_subtitle_track_menu(self, menu: QtWidgets.QMenu) -> None:
+        tracks = self._subtitle_tracks()
+        current_spu = self.vlc_player.video_get_spu()
+
+        if not tracks:
+            action = menu.addAction("字幕トラックなし")
+            action.setEnabled(False)
+            return
+
+        for spu_id, name in tracks:
+            action = menu.addAction(self._subtitle_track_display_name(spu_id, name))
+            action.setCheckable(True)
+            action.setChecked(spu_id == current_spu)
+            action.triggered.connect(
+                lambda _checked=False, sid=spu_id, label=name: self._select_subtitle_track(
+                    sid,
+                    label,
+                )
+            )
+
+    def _subtitle_tracks(self) -> list[tuple[int, str]]:
+        tracks = self.vlc_player.video_get_spu_description()
+        if not tracks:
+            return []
+        if not any(spu_id < 0 for spu_id, _name in tracks):
+            return [(-1, "オフ"), *tracks]
+        return tracks
+
+    def _subtitle_track_display_name(self, spu_id: int, name: str) -> str:
+        if spu_id < 0:
+            return "オフ"
+        return name or f"Subtitle {spu_id}"
+
+    def _select_subtitle_track(self, spu_id: int, name: str) -> None:
+        if not self.vlc_player.video_set_spu(spu_id, context="select_subtitle_track"):
+            self._show_status_message("字幕の切替に失敗しました", 3000)
+            return
+
+        if spu_id < 0:
+            self.subtitle_enabled = False
+            self.settings_store.set_value("subtitle_enabled", False)
+            self._show_status_message("字幕: オフ", 3000)
+            self._show_overlay("[字幕: オフ]")
+            return
+
+        self.subtitle_enabled = True
+        language = self._audio_track_language_key(name)
+        if language:
+            self.preferred_subtitle_language = language
+            self.settings_store.set_value("preferred_subtitle_language", language)
+        self.settings_store.set_value("subtitle_enabled", True)
+        display_name = self._subtitle_track_display_name(spu_id, name)
+        self._show_status_message(f"字幕: {display_name}", 3000)
+        self._show_overlay(f"[字幕: {display_name}]")
+
+    def _apply_preferred_subtitle_track(self, show_message: bool) -> bool:
+        if not self.subtitle_enabled:
+            current_spu = self.vlc_player.video_get_spu()
+            if current_spu < 0:
+                return True
+            return self.vlc_player.video_set_spu(-1, context="apply_subtitle_off")
+
+        language = self._normalize_audio_language(self.preferred_subtitle_language)
+        match = self._find_subtitle_track_for_language(language)
+        if match is None:
+            return False
+
+        spu_id, name = match
+        current_spu = self.vlc_player.video_get_spu()
+        if current_spu == spu_id:
+            return True
+
+        if not self.vlc_player.video_set_spu(spu_id, context="apply_preferred_subtitle_track"):
+            return False
+
+        if show_message:
+            self._show_status_message(
+                f"字幕: {self._subtitle_track_display_name(spu_id, name)}",
+                3000,
+            )
+        return True
+
+    def _find_subtitle_track_for_language(self, language: str) -> Optional[tuple[int, str]]:
+        for spu_id, name in self._subtitle_tracks():
+            if spu_id >= 0 and self._audio_track_language_key(name) == language:
+                return (spu_id, name)
+        return None
 
     def _get_current_playlist(self) -> list[str]:
         """現在の再生モードに応じたプレイリストを返すヘルパーメソッド"""

@@ -8,6 +8,7 @@ from wagom_player.infrastructure.trash import TrashService
 
 QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
+QtWidgets = pytest.importorskip("PyQt5.QtWidgets", exc_type=ImportError)
 
 main_window = importlib.import_module("wagom_player.ui.main_window")
 
@@ -178,6 +179,107 @@ def test_playback_controls_seek_rate_volume_and_mute(player):
     assert player.volume_slider.value() == 100
     player._toggle_mute()
     assert player._muted
+
+
+def test_preferred_audio_language_defaults_to_japanese(player):
+    player.player.audio_track_descriptions = [
+        (1, "Track 1 - English"),
+        (2, "Track 2 - Japanese"),
+    ]
+    player.player.audio_track = 1
+
+    assert player.preferred_audio_language == "ja"
+    assert player._apply_preferred_audio_track(show_message=False)
+
+    assert player.player.audio_track == 2
+
+
+def test_select_audio_track_saves_language_preference(player):
+    player.player.audio_track_descriptions = [
+        (1, "Track 1 - Japanese"),
+        (2, "Track 2 - English"),
+    ]
+
+    player._select_audio_track(2, "Track 2 - English")
+
+    assert player.player.audio_track == 2
+    assert player.preferred_audio_language == "en"
+    assert player.settings.value("preferred_audio_language") == "en"
+
+
+def test_saved_audio_language_applies_to_next_matching_track(player):
+    player._select_audio_track(2, "English")
+    player.player.audio_track_descriptions = [
+        (3, "日本語"),
+        (4, "English Commentary"),
+    ]
+    player.player.audio_track = 3
+
+    assert player._apply_preferred_audio_track(show_message=False)
+
+    assert player.player.audio_track == 4
+
+
+def test_audio_track_menu_lists_tracks_and_marks_current(player):
+    player.player.audio_track_descriptions = [(1, "English"), (2, "Japanese")]
+    player.player.audio_track = 2
+    menu = QtWidgets.QMenu()
+
+    player._populate_audio_track_menu(menu)
+
+    actions = menu.actions()
+    assert [action.text() for action in actions] == ["English", "Japanese"]
+    assert [action.isChecked() for action in actions] == [False, True]
+
+
+def test_select_subtitle_track_saves_enabled_language_preference(player):
+    player.player.spu_descriptions = [(-1, "Disable"), (3, "Japanese"), (4, "English")]
+
+    player._select_subtitle_track(3, "Japanese")
+
+    assert player.player.spu == 3
+    assert player.subtitle_enabled
+    assert player.preferred_subtitle_language == "ja"
+    assert player.settings.value("subtitle_enabled", type=bool)
+    assert player.settings.value("preferred_subtitle_language") == "ja"
+
+
+def test_select_subtitle_off_saves_disabled_state(player):
+    player.player.spu = 4
+
+    player._select_subtitle_track(-1, "Disable")
+
+    assert player.player.spu == -1
+    assert not player.subtitle_enabled
+    assert not player.settings.value("subtitle_enabled", type=bool)
+
+
+def test_saved_subtitle_language_applies_when_enabled(player):
+    player._select_subtitle_track(4, "English")
+    player.player.spu_descriptions = [(-1, "Disable"), (8, "日本語"), (9, "English SDH")]
+    player.player.spu = -1
+
+    assert player._apply_preferred_subtitle_track(show_message=False)
+
+    assert player.player.spu == 9
+
+
+def test_subtitle_menu_lists_off_and_tracks(player):
+    player.player.spu_descriptions = [(-1, "Disable"), (3, "English"), (4, "Japanese")]
+    player.player.spu = -1
+    menu = QtWidgets.QMenu()
+
+    player._populate_subtitle_track_menu(menu)
+
+    actions = menu.actions()
+    assert [action.text() for action in actions] == ["オフ", "English", "Japanese"]
+    assert [action.isChecked() for action in actions] == [True, False, False]
+
+
+def test_menu_bar_contains_common_player_menus(player):
+    titles = [action.text() for action in player.menuBar().actions()]
+
+    assert titles == ["ファイル", "再生", "音声", "字幕", "表示", "ツール", "ヘルプ"]
 
 
 def test_status_time_updates_slider_warning_and_snapshot(player):

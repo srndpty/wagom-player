@@ -21,6 +21,16 @@ def bind_shortcuts(window: Any, shortcut_rows: Sequence[tuple[str, str, str]]) -
         QtCore.Qt.Key_Right,
         lambda: window.seek_by(window.SEEK_SHORT_MS),
     )
+    # Ctrl+←/→ の 60秒シークも ApplicationShortcut にする。keyPressEvent 方式だと
+    # フォーカスを持つスライダー等が矢印キーを先に消費してしまい届かないため。
+    window._sc_long_seek_back = make_shortcut(
+        int(QtCore.Qt.ControlModifier | QtCore.Qt.Key_Left),
+        window._long_seek_backward,
+    )
+    window._sc_long_seek_fwd = make_shortcut(
+        int(QtCore.Qt.ControlModifier | QtCore.Qt.Key_Right),
+        window._long_seek_forward,
+    )
     window._sc_frame_prev = make_shortcut(QtCore.Qt.Key_Comma, lambda: window.step_frame(-1))
     window._sc_frame_next = make_shortcut(QtCore.Qt.Key_Period, lambda: window.step_frame(1))
     window._sc_up = make_shortcut(QtCore.Qt.Key_Up, lambda: window._adjust_volume(+10))

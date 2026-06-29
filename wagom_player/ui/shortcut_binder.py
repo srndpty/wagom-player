@@ -21,6 +21,8 @@ def bind_shortcuts(window: Any, shortcut_rows: Sequence[tuple[str, str, str]]) -
         QtCore.Qt.Key_Right,
         lambda: window.seek_by(window.SEEK_SHORT_MS),
     )
+    window._sc_frame_prev = make_shortcut(QtCore.Qt.Key_Comma, lambda: window.step_frame(-1))
+    window._sc_frame_next = make_shortcut(QtCore.Qt.Key_Period, lambda: window.step_frame(1))
     window._sc_up = make_shortcut(QtCore.Qt.Key_Up, lambda: window._adjust_volume(+10))
     window._sc_down = make_shortcut(QtCore.Qt.Key_Down, lambda: window._adjust_volume(-10))
     window._sc_mute = make_shortcut(QtCore.Qt.Key_M, window._toggle_mute)

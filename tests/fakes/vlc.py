@@ -29,6 +29,7 @@ class FakePlayer:
         self.volume = 80
         self.muted = False
         self.rate = 1.0
+        self.fps = 25.0
         self.time = 0
         self.length = 120_000
         self.playing = False
@@ -86,6 +87,9 @@ class FakePlayer:
 
     def get_rate(self):
         return self.rate
+
+    def get_fps(self):
+        return self.fps
 
     def get_state(self):
         return self.state

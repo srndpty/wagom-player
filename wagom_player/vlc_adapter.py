@@ -98,6 +98,10 @@ class VlcPlayerAdapter:
         value = self.call("vlc_get_rate", self._player.get_rate, default=default)
         return self._to_float("vlc_get_rate_convert", value, default)
 
+    def get_fps(self, default: float = 0.0) -> float:
+        value = self.call("vlc_get_fps", self._player.get_fps, default=default)
+        return self._to_float("vlc_get_fps_convert", value, default)
+
     def is_playing(self) -> bool:
         return bool(self.call("vlc_is_playing", self._player.is_playing, default=False))
 

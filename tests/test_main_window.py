@@ -928,6 +928,71 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
     ]
 
 
+def test_ctrl_arrow_long_seek_requires_ctrl_only(player, monkeypatch):
+    # README が示す契約は Ctrl+←/→ 単独。Shift/Alt が混ざった組み合わせは
+    # 60秒シークを発生させない。
+    seeks = []
+    monkeypatch.setattr(player, "seek_by", seeks.append)
+
+    ctrl_shift_right = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_Right,
+        QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier,
+    )
+    player.keyPressEvent(ctrl_shift_right)
+    assert seeks == []
+
+    ctrl_alt_right = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_Right,
+        QtCore.Qt.ControlModifier | QtCore.Qt.AltModifier,
+    )
+    player.keyPressEvent(ctrl_alt_right)
+    assert seeks == []
+
+
+def test_ctrl_arrow_long_seek_throttles_autorepeat(player, monkeypatch):
+    seeks = []
+    monkeypatch.setattr(player, "seek_by", seeks.append)
+
+    ctrl_right = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_Right,
+        QtCore.Qt.ControlModifier,
+    )
+    player.keyPressEvent(ctrl_right)
+    assert seeks == [player.SEEK_LONG_MS]
+
+    # 同一キーの短間隔リピートは 1 回分に抑止される
+    ctrl_right_repeat = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_Right,
+        QtCore.Qt.ControlModifier,
+        "",
+        True,
+    )
+    player.keyPressEvent(ctrl_right_repeat)
+    assert seeks == [player.SEEK_LONG_MS]
+
+    # スロットリング窓を超えたリピートは追加で 1 回受理される
+    player._last_long_seek_msec_by_key[int(QtCore.Qt.Key_Right)] = 0
+    player.keyPressEvent(ctrl_right_repeat)
+    assert seeks == [player.SEEK_LONG_MS, player.SEEK_LONG_MS]
+
+    # Ctrl+Left と Ctrl+Right は別キーとして独立して扱われる
+    ctrl_left = QtGui.QKeyEvent(
+        QtCore.QEvent.KeyPress,
+        QtCore.Qt.Key_Left,
+        QtCore.Qt.ControlModifier,
+    )
+    player.keyPressEvent(ctrl_left)
+    assert seeks == [
+        player.SEEK_LONG_MS,
+        player.SEEK_LONG_MS,
+        -player.SEEK_LONG_MS,
+    ]
+
+
 def test_status_time_does_not_overwrite_priority_message(player):
     player.directory_playlist = ["a.mp4"]
     player.current_index = 0

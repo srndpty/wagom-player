@@ -1145,7 +1145,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
         key = event.key()
         mods = event.modifiers()
         is_keypad = bool(mods & QtCore.Qt.KeypadModifier)
-        is_control = bool(mods & QtCore.Qt.ControlModifier)
+        # Ctrl+←/→ の長時間シークは「Ctrl 単独」に限定する。Shift/Alt/Meta が
+        # 組み合わさったものは対象外にして、将来のショートカットや
+        # フォーカス中ウィジェットの標準操作との衝突を避ける。
+        navigation_modifiers = (
+            QtCore.Qt.ControlModifier
+            | QtCore.Qt.ShiftModifier
+            | QtCore.Qt.AltModifier
+            | QtCore.Qt.MetaModifier
+        )
+        is_ctrl_only = (
+            (mods & navigation_modifiers) == QtCore.Qt.ControlModifier
+            and not (mods & QtCore.Qt.KeypadModifier)
+        )
 
         if is_keypad and key == QtCore.Qt.Key_4:
             # Num4: 60秒進む
@@ -1163,7 +1175,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.seek_by(-self.SEEK_LONG_MS)
             event.accept()
             return
-        if is_control and key == QtCore.Qt.Key_Right:
+        if is_ctrl_only and key == QtCore.Qt.Key_Right:
             # Ctrl+Right: 60秒進む
             if self._should_ignore_long_seek(event):
                 event.accept()
@@ -1171,7 +1183,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self.seek_by(self.SEEK_LONG_MS)
             event.accept()
             return
-        if is_control and key == QtCore.Qt.Key_Left:
+        if is_ctrl_only and key == QtCore.Qt.Key_Left:
             # Ctrl+Left: 60秒戻る
             if self._should_ignore_long_seek(event):
                 event.accept()

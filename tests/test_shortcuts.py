@@ -15,6 +15,8 @@ def test_shortcut_rows_include_existing_keys():
         "Right",
         "Num 1",
         "Num 4",
+        "Ctrl+Left",
+        "Ctrl+Right",
         "Page Up",
         "Page Down",
         "Up",

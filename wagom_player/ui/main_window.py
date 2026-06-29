@@ -140,7 +140,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._seeking_user: bool = False
         self._media_length: int = -1
         self._ending: bool = False
-        self._last_keypad_seek_msec_by_key: dict[int, int] = {}
+        self._last_long_seek_msec_by_key: dict[int, int] = {}
         self._file_operation_in_progress: bool = False
         self._status_priority_until_msec: int = 0
 
@@ -1128,17 +1128,31 @@ class VideoPlayer(QtWidgets.QMainWindow):
         except Exception as e:
             diagnostics.record_exception("step_frame", e, direction=direction)
 
-    def _should_ignore_keypad_seek(self, event: QtGui.QKeyEvent) -> bool:
+    def _should_ignore_long_seek_key(self, key: int) -> bool:
         # 長押し中のオートリピートも受け付ける(矢印キーと挙動を揃える)。連続入力が
         # 速すぎないよう、キーごとに最小間隔でスロットリングするだけに留める。
-        key = int(event.key())
         now = QtCore.QDateTime.currentMSecsSinceEpoch()
-        last = self._last_keypad_seek_msec_by_key.get(key, 0)
+        last = self._last_long_seek_msec_by_key.get(key, 0)
         if now - last < 150:
             return True
 
-        self._last_keypad_seek_msec_by_key[key] = now
+        self._last_long_seek_msec_by_key[key] = now
         return False
+
+    def _should_ignore_long_seek(self, event: QtGui.QKeyEvent) -> bool:
+        return self._should_ignore_long_seek_key(int(event.key()))
+
+    def _long_seek_forward(self) -> None:
+        # Ctrl+→: 60秒進む(QShortcut から呼ばれる。フォーカス位置に依存しない)
+        if self._should_ignore_long_seek_key(int(QtCore.Qt.Key_Right)):
+            return
+        self.seek_by(self.SEEK_LONG_MS)
+
+    def _long_seek_backward(self) -> None:
+        # Ctrl+←: 60秒戻る
+        if self._should_ignore_long_seek_key(int(QtCore.Qt.Key_Left)):
+            return
+        self.seek_by(-self.SEEK_LONG_MS)
 
     # ------------- キー操作 -------------
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
@@ -1148,7 +1162,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
         if is_keypad and key == QtCore.Qt.Key_4:
             # Num4: 60秒進む
-            if self._should_ignore_keypad_seek(event):
+            if self._should_ignore_long_seek(event):
                 event.accept()
                 return
             self.seek_by(self.SEEK_LONG_MS)
@@ -1156,7 +1170,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
             return
         if is_keypad and key == QtCore.Qt.Key_1:
             # Num1: 60秒戻る
-            if self._should_ignore_keypad_seek(event):
+            if self._should_ignore_long_seek(event):
                 event.accept()
                 return
             self.seek_by(-self.SEEK_LONG_MS)

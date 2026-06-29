@@ -888,7 +888,7 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
     assert seeks == [player.SEEK_LONG_MS]
 
     # 長押し継続でスロットリング窓を超えたオートリピートは連続シークとして受け付ける
-    player._last_keypad_seek_msec_by_key[int(QtCore.Qt.Key_4)] = 0
+    player._last_long_seek_msec_by_key[int(QtCore.Qt.Key_4)] = 0
     player.keyPressEvent(repeat_event)
     assert seeks == [player.SEEK_LONG_MS, player.SEEK_LONG_MS]
 
@@ -899,6 +899,63 @@ def test_drag_drop_and_keypad_events(player, tmp_path, monkeypatch):
     )
     player.keyPressEvent(previous_event)
     assert seeks == [player.SEEK_LONG_MS, player.SEEK_LONG_MS, -player.SEEK_LONG_MS]
+
+    # Ctrl+←/→ の 60秒シークは QShortcut 経由のハンドラで処理する。
+    player._long_seek_forward()
+    assert seeks == [
+        player.SEEK_LONG_MS,
+        player.SEEK_LONG_MS,
+        -player.SEEK_LONG_MS,
+        player.SEEK_LONG_MS,
+    ]
+
+    player._long_seek_backward()
+    assert seeks == [
+        player.SEEK_LONG_MS,
+        player.SEEK_LONG_MS,
+        -player.SEEK_LONG_MS,
+        player.SEEK_LONG_MS,
+        -player.SEEK_LONG_MS,
+    ]
+
+
+def test_ctrl_arrow_long_seek_bound_as_application_shortcut(player):
+    # Ctrl+←/→ は ApplicationShortcut として登録し、フォーカス位置に依存せず発火する
+    # (keyPressEvent 方式だとフォーカス中のスライダー等が矢印キーを先取りしてしまう)。
+    # 厳密なキーシーケンスなので Ctrl+Shift / Ctrl+Alt では誤発火しない。
+    assert player._sc_long_seek_fwd.context() == QtCore.Qt.ApplicationShortcut
+    assert player._sc_long_seek_back.context() == QtCore.Qt.ApplicationShortcut
+    assert player._sc_long_seek_fwd.key() == QtGui.QKeySequence(
+        QtCore.Qt.ControlModifier | QtCore.Qt.Key_Right
+    )
+    assert player._sc_long_seek_back.key() == QtGui.QKeySequence(
+        QtCore.Qt.ControlModifier | QtCore.Qt.Key_Left
+    )
+
+
+def test_ctrl_arrow_long_seek_throttles_autorepeat(player, monkeypatch):
+    seeks = []
+    monkeypatch.setattr(player, "seek_by", seeks.append)
+
+    player._long_seek_forward()
+    assert seeks == [player.SEEK_LONG_MS]
+
+    # 同一キーの短間隔リピートは 1 回分に抑止される
+    player._long_seek_forward()
+    assert seeks == [player.SEEK_LONG_MS]
+
+    # スロットリング窓を超えたリピートは追加で 1 回受理される
+    player._last_long_seek_msec_by_key[int(QtCore.Qt.Key_Right)] = 0
+    player._long_seek_forward()
+    assert seeks == [player.SEEK_LONG_MS, player.SEEK_LONG_MS]
+
+    # Ctrl+Left と Ctrl+Right は別キーとして独立して扱われる
+    player._long_seek_backward()
+    assert seeks == [
+        player.SEEK_LONG_MS,
+        player.SEEK_LONG_MS,
+        -player.SEEK_LONG_MS,
+    ]
 
 
 def test_status_time_does_not_overwrite_priority_message(player):

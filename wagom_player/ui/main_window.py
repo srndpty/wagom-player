@@ -57,6 +57,7 @@ def _create_vlc_instance() -> "vlc.Instance":
 class VideoPlayer(QtWidgets.QMainWindow):
     SEEK_SHORT_MS = 10_000
     SEEK_LONG_MS = 60_000
+    FRAME_STEP_FALLBACK_MS = 33
     DEFAULT_AUDIO_LANGUAGE = "ja"
     AUDIO_LANGUAGE_ALIASES = {
         "ja": ("ja", "jpn", "jp", "japanese", "japan", "日本語", "日本", "日語"),
@@ -227,6 +228,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
         playback_menu.addAction("10秒進む").triggered.connect(
             lambda: self.seek_by(self.SEEK_SHORT_MS)
         )
+        playback_menu.addSeparator()
+        playback_menu.addAction("1コマ戻る").triggered.connect(lambda: self.step_frame(-1))
+        playback_menu.addAction("1コマ進む").triggered.connect(lambda: self.step_frame(1))
         playback_menu.addSeparator()
         playback_menu.addAction("再生速度を下げる").triggered.connect(
             lambda: self._change_playback_rate(-0.1)
@@ -1095,6 +1099,34 @@ class VideoPlayer(QtWidgets.QMainWindow):
             self._show_overlay(f"[{self._format_ms(new_t)} ({percent}%)]")
         except Exception as e:
             diagnostics.record_exception("seek_by", e, delta_ms=delta_ms)
+
+    def _frame_step_ms(self) -> int:
+        fps = self.vlc_player.get_fps()
+        if fps > 0:
+            return max(1, int(round(1000 / fps)))
+        return self.FRAME_STEP_FALLBACK_MS
+
+    def step_frame(self, direction: int) -> None:
+        diagnostics.record_breadcrumb("step_frame", direction=direction)
+        try:
+            t = self.vlc_player.get_time()
+            length = self.vlc_player.get_length()
+            if t == -1 or length <= 0:
+                return
+
+            step_ms = self._frame_step_ms()
+            delta_ms = step_ms if direction > 0 else -step_ms
+            new_t = max(0, min(t + delta_ms, length - 1))
+            self.vlc_player.set_time(
+                new_t,
+                context="step_frame_set_time",
+                direction=direction,
+                step_ms=step_ms,
+            )
+            percent = int(round(new_t / length * 100)) if length > 0 else 0
+            self._show_overlay(f"[{self._format_ms(new_t)} ({percent}%)]")
+        except Exception as e:
+            diagnostics.record_exception("step_frame", e, direction=direction)
 
     def _should_ignore_keypad_seek(self, event: QtGui.QKeyEvent) -> bool:
         # 長押し中のオートリピートも受け付ける(矢印キーと挙動を揃える)。連続入力が

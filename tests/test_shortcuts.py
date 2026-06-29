@@ -9,6 +9,8 @@ def test_shortcut_rows_include_existing_keys():
         "Ctrl+C",
         "F1",
         "Space",
+        ",",
+        ".",
         "Left",
         "Right",
         "Num 1",

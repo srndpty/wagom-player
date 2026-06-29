@@ -170,6 +170,21 @@ def test_playback_controls_seek_rate_volume_and_mute(player):
     player.seek_by(-200_000)
     assert player.player.time == 0
 
+    player.player.fps = 25.0
+    player.player.time = 1_000
+    player.step_frame(1)
+    assert player.player.time == 1_040
+    player.step_frame(-1)
+    assert player.player.time == 1_000
+
+    player.player.time = 0
+    player.step_frame(-1)
+    assert player.player.time == 0
+
+    player.player.time = 119_990
+    player.step_frame(1)
+    assert player.player.time == 119_999
+
     player._change_playback_rate(10)
     assert player.playback_rate == player.playback_rate_max
     player._change_playback_rate(-10)
@@ -180,6 +195,16 @@ def test_playback_controls_seek_rate_volume_and_mute(player):
     assert player.volume_slider.value() == 100
     player._toggle_mute()
     assert player._muted
+
+
+def test_frame_step_falls_back_when_fps_is_unavailable(player):
+    player.player.fps = 0
+    player.player.time = 1_000
+    player.player.length = 120_000
+
+    player.step_frame(1)
+
+    assert player.player.time == 1_000 + player.FRAME_STEP_FALLBACK_MS
 
 
 def test_preferred_audio_language_defaults_to_japanese(player):

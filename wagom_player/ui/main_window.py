@@ -1154,9 +1154,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             | QtCore.Qt.AltModifier
             | QtCore.Qt.MetaModifier
         )
-        is_ctrl_only = (
-            (mods & navigation_modifiers) == QtCore.Qt.ControlModifier
-            and not (mods & QtCore.Qt.KeypadModifier)
+        is_ctrl_only = (mods & navigation_modifiers) == QtCore.Qt.ControlModifier and not (
+            mods & QtCore.Qt.KeypadModifier
         )
 
         if is_keypad and key == QtCore.Qt.Key_4:

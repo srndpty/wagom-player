@@ -1,1 +1,12 @@
-__all__ = ["main_window", "player_view", "shortcut_binder"]
+__all__ = [
+    "controllers",
+    "dialogs",
+    "main_window",
+    "overlay",
+    "player_view",
+    "seek_slider",
+    "shortcut_binder",
+    "shortcuts",
+    "styles",
+    "theme",
+]

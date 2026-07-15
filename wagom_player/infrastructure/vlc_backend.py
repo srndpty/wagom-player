@@ -3,7 +3,7 @@ from typing import Any
 
 from PyQt5 import QtCore
 
-from ..vlc_adapter import VlcPlayerAdapter
+from .vlc_adapter import VlcPlayerAdapter
 
 try:
     import vlc

@@ -1,6 +1,6 @@
 import importlib
 
-app_module = importlib.import_module("app")
+app_module = importlib.import_module("wagom_player.bootstrap")
 
 
 class _FakeLock:

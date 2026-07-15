@@ -5,7 +5,7 @@ from . import diagnostics
 
 
 class VlcPlayerAdapter:
-    """Small exception-safe boundary around python-vlc player calls."""
+    """python-vlc呼び出しを例外から保護する小さな境界。"""
 
     def __init__(self, player: Any):
         self._player = player

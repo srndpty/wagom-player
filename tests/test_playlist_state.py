@@ -1,4 +1,5 @@
-from wagom_player.playlist_state import (
+from wagom_player.domain.playlist import (
+    PlaylistSession,
     active_playlist,
     adjacent_index,
     create_shuffled_playlist,
@@ -62,3 +63,23 @@ def test_next_index_after_removal_for_shuffle_order():
     assert next_index_after_removal(directory, 1, True, "c.mp4") == 1
     assert next_index_after_removal(directory, 1, True, "missing.mp4") is None
     assert next_index_after_removal(directory, 1, True, None) is None
+
+
+def test_playlist_session_load_select_and_remove():
+    session = PlaylistSession()
+
+    assert session.load(["a.mp4", "b.mp4", "c.mp4"], "b.mp4") == 1
+    assert session.current_path == "b.mp4"
+    assert session.select(2)
+    assert not session.select(3)
+    assert session.remove_current() is None
+    assert session.current_path is None
+
+
+def test_playlist_session_removes_current_in_shuffle_order():
+    session = PlaylistSession(["a.mp4", "b.mp4", "c.mp4"], 0)
+    session.set_shuffle(True, lambda items: items.reverse())
+
+    assert session.active_paths() == ["a.mp4", "c.mp4", "b.mp4"]
+    assert session.remove_current("c.mp4") == 1
+    assert session.current_path == "c.mp4"

@@ -1,7 +1,7 @@
 import ctypes
 import sys
 
-from .. import diagnostics
+from . import diagnostics
 
 
 def apply_windows_dark_titlebar(hwnd: int) -> None:

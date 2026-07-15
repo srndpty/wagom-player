@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from wagom_player.file_actions import (
+from wagom_player.application.file_actions import (
     InvalidMoveTargetError,
     TargetFileExistsError,
     move_file_to_path,

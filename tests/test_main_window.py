@@ -1,5 +1,6 @@
 import importlib
 import os
+import threading
 
 import pytest
 
@@ -22,7 +23,7 @@ def player(qapp, monkeypatch, tmp_path):
     qapp.setOrganizationName("wagom-player-tests")
     qapp.setApplicationName("wagom-player-tests")
     QtCore.QSettings().clear()
-    window = main_window.VideoPlayer()
+    window = main_window.MainWindow()
     yield window
     window.timer.stop()
     window.close()
@@ -265,7 +266,7 @@ def test_select_audio_track_saves_language_preference(player):
 
     assert player.player.audio_track == 2
     assert player.preferred_audio_language == "en"
-    assert player.settings.value("preferred_audio_language") == "en"
+    assert player.settings_store.value("preferred_audio_language") == "en"
 
 
 def test_saved_audio_language_applies_to_next_matching_track(player):
@@ -301,8 +302,8 @@ def test_select_subtitle_track_saves_enabled_language_preference(player):
     assert player.player.spu == 3
     assert player.subtitle_enabled
     assert player.preferred_subtitle_language == "ja"
-    assert player.settings.value("subtitle_enabled", type=bool)
-    assert player.settings.value("preferred_subtitle_language") == "ja"
+    assert player.settings_store.value("subtitle_enabled", type=bool)
+    assert player.settings_store.value("preferred_subtitle_language") == "ja"
 
 
 def test_select_subtitle_off_saves_disabled_state(player):
@@ -312,7 +313,7 @@ def test_select_subtitle_off_saves_disabled_state(player):
 
     assert player.player.spu == -1
     assert not player.subtitle_enabled
-    assert not player.settings.value("subtitle_enabled", type=bool)
+    assert not player.settings_store.value("subtitle_enabled", type=bool)
 
 
 def test_saved_subtitle_language_applies_when_enabled(player):
@@ -794,7 +795,7 @@ def test_move_current_file_release_timeout_aborts_operation(player, tmp_path, mo
 def test_stop_and_clear_media_timeout_skips_set_media(player, monkeypatch):
     # stop() がブロックし続ける状況を模し、タイムアウトで False を返すこと、
     # set_media(None) が呼ばれず、player が差し替えられることを確認する。
-    block = main_window.threading.Event()
+    block = threading.Event()
     old_player = player.player
     old_vlc_player = player.vlc_player
     set_media_calls = []
@@ -984,7 +985,7 @@ def test_metadata_dialog_receives_collected_text(player, monkeypatch):
     player.directory_playlist = ["movie.mp4"]
     player.current_index = 0
     player.player.media.meta = {main_window.vlc.Meta.Title: "Sample"}
-    monkeypatch.setattr(main_window, "MetadataDialog", FakeDialog)
+    monkeypatch.setattr(main_window._implementation, "MetadataDialog", FakeDialog)
 
     player._show_metadata_dialog()
 

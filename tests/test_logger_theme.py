@@ -2,13 +2,13 @@ import os
 
 import pytest
 
-from wagom_player import logger
+from wagom_player.infrastructure import logger
 
 
 def _import_qt_theme_or_skip():
     QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
     QtWidgets = pytest.importorskip("PyQt5.QtWidgets", exc_type=ImportError)
-    from wagom_player import theme
+    from wagom_player.ui import theme
 
     return QtGui, QtWidgets, theme
 

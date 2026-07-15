@@ -8,7 +8,7 @@ import pytest
 QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtNetwork = pytest.importorskip("PyQt5.QtNetwork", exc_type=ImportError)
 
-single_instance = importlib.import_module("wagom_player.single_instance")
+single_instance = importlib.import_module("wagom_player.infrastructure.single_instance")
 
 
 @pytest.mark.skipif(

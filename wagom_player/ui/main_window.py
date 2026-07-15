@@ -1354,9 +1354,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
                     vlc_player.set_media(None, context=f"{context}_clear_media")
                     log_message(f"[release] VLC stop finished; media cleared: context={context}")
                 else:
-                    log_message(
-                        f"[release] VLC stop finished; media preserved: context={context}"
-                    )
+                    log_message(f"[release] VLC stop finished; media preserved: context={context}")
             else:
                 log_message("[release] player changed while releasing; skip clear_media")
             return True

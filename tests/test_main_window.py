@@ -489,6 +489,59 @@ def test_media_end_repeat_reloads_current_media(player, monkeypatch):
     assert player.seek_slider.maximum() == 0
 
 
+def test_play_at_uses_non_blocking_stop_helper(player, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        player,
+        "_stop_and_clear_media_without_blocking_ui",
+        lambda **kwargs: calls.append(kwargs) or True,
+    )
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+
+    player.play_at(1)
+
+    assert calls == [{"context": "play_at_player_stop"}]
+    assert player.current_index == 1
+    assert player.player.media.path == "b.mp4"
+    assert player.player.playing
+
+
+def test_status_timer_does_not_query_vlc_while_stop_is_in_progress(player, monkeypatch):
+    calls = []
+    monkeypatch.setattr(player.vlc_player, "get_time", lambda: calls.append("get_time"))
+    monkeypatch.setattr(player.vlc_player, "get_length", lambda: calls.append("get_length"))
+    monkeypatch.setattr(main_window.diagnostics, "heartbeat", lambda: calls.append("heartbeat"))
+    player._vlc_stop_in_progress = True
+
+    player._update_status_time()
+
+    assert calls == ["heartbeat"]
+
+
+def test_pending_track_timer_does_not_query_vlc_while_stop_is_in_progress(
+    player, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(
+        player,
+        "_apply_preferred_audio_track",
+        lambda **kwargs: calls.append("audio") or True,
+    )
+    monkeypatch.setattr(
+        player,
+        "_apply_preferred_subtitle_track",
+        lambda **kwargs: calls.append("subtitle") or True,
+    )
+    player._pending_audio_language_apply = True
+    player._pending_subtitle_apply = True
+    player._vlc_stop_in_progress = True
+
+    player._apply_preferred_tracks_if_pending(player._track_apply_generation)
+
+    assert calls == []
+
+
 def test_move_current_file_updates_playlist_without_real_play(player, tmp_path, monkeypatch):
     first = tmp_path / "a.mp4"
     second = tmp_path / "b.mp4"

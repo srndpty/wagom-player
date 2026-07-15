@@ -92,6 +92,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.vlc_player = VlcPlayerAdapter(self.player)
         self.vlc_events = VlcEvents()
         self._vlc_generation = 0
+        # libVLC の stop() をワーカースレッドで待っている間は、UI タイマーから
+        # 同じ player へ問い合わせない。stop と get_time/get_length が競合すると
+        # Windows では双方が戻らなくなることがある。
+        self._vlc_stop_in_progress = False
         self._vlc_events_signal_connected = False
         self._attach_vlc_events(self._next_vlc_generation())
 
@@ -655,15 +659,19 @@ class VideoPlayer(QtWidgets.QMainWindow):
             log_message(f"play_at(): path={path}")
             diagnostics.record_breadcrumb("play_at_start", index=index, old_index=old, path=path)
 
-            try:
-                log_message("play_at(): before player.stop()")
-                diagnostics.record_breadcrumb("play_at_before_player_stop", path=path)
-                self.vlc_player.stop(context="play_at_player_stop", path=path)
-                log_message("play_at(): after player.stop()")
+            log_message("play_at(): before non-blocking player.stop()")
+            diagnostics.record_breadcrumb("play_at_before_player_stop", path=path)
+            stopped = self._stop_and_clear_media_without_blocking_ui(
+                context="play_at_player_stop"
+            )
+            if stopped:
+                log_message("play_at(): after non-blocking player.stop()")
                 diagnostics.record_breadcrumb("play_at_after_player_stop", path=path)
-            except Exception as e:
-                log_message(f"play_at(): player.stop() error: {e}")
-                diagnostics.record_breadcrumb("play_at_player_stop_error", error=str(e))
+            else:
+                # タイムアウト時は helper が fresh player に差し替えている。古い
+                # player の停止完了を待たず、新しい player で再生を継続できる。
+                log_message("play_at(): player.stop() timed out; continuing with fresh player")
+                diagnostics.record_breadcrumb("play_at_player_stop_timeout", path=path)
 
             try:
                 log_message("play_at(): before media_new/parse")
@@ -802,6 +810,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
             )
 
     def _apply_preferred_tracks_if_pending(self, generation: Optional[int] = None) -> None:
+        if self._vlc_stop_in_progress:
+            return
         # 別の動画へ切り替わった後の古い callback なら何もしない。
         if generation is not None and generation != self._track_apply_generation:
             return
@@ -1057,7 +1067,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def stop(self) -> None:
         diagnostics.record_breadcrumb("stop_requested")
-        self.vlc_player.stop(context="stop_player_stop")
+        stopped = self._stop_and_clear_media_without_blocking_ui(context="stop_player_stop")
+        if not stopped:
+            log_message("stop(): VLC stop timed out; fresh player is now idle")
         self._apply_stopped_ui_state()
 
     def _apply_stopped_ui_state(self) -> None:
@@ -1217,7 +1229,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents)
         return released
 
-    def _stop_and_clear_media_without_blocking_ui(self, timeout_ms: int = 8000) -> bool:
+    def _stop_and_clear_media_without_blocking_ui(
+        self,
+        timeout_ms: int = 8000,
+        context: str = "move_current_file_stop",
+    ) -> bool:
         """VLC の停止をワーカースレッドで行い、UI を固めずに完了を待つ。
 
         VLC の同期 ``stop()`` は埋め込みビデオウィンドウの破棄を伴い、その破棄完了を
@@ -1237,6 +1253,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
         戻り値は stop 完了を確認できたら ``True``、``timeout_ms`` 以内に完了を確認
         できなければ ``False``。
         """
+        if self._vlc_stop_in_progress:
+            log_message(f"[release] duplicate VLC stop ignored: context={context}")
+            return False
+
         done = threading.Event()
         vlc_player = self.vlc_player
         generation = self._vlc_generation
@@ -1244,36 +1264,44 @@ class VideoPlayer(QtWidgets.QMainWindow):
         def _worker() -> None:
             # libVLC 呼び出しのみ。Qt オブジェクトには触れないこと。
             try:
-                vlc_player.stop(context="move_current_file_stop")
+                vlc_player.stop(context=context)
             finally:
                 done.set()
 
         thread = threading.Thread(target=_worker, name="vlc-release", daemon=True)
-        log_message("[release] starting VLC stop on worker thread")
-        thread.start()
+        log_message(f"[release] starting VLC stop on worker thread: context={context}")
+        self._vlc_stop_in_progress = True
+        try:
+            thread.start()
 
-        deadline = QtCore.QDateTime.currentMSecsSinceEpoch() + timeout_ms
-        while not done.wait(0):
-            # ExcludeUserInputEvents: VLC が必要とするウィンドウ/描画/タイマー/投函
-            # イベントは処理しつつ、解放中のユーザー操作の再入は抑制する。
-            QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents, 50)
-            if QtCore.QDateTime.currentMSecsSinceEpoch() >= deadline:
-                log_message("[release] VLC stop timed out; aborting file operation")
-                diagnostics.record_breadcrumb("vlc_release_timeout_recreate_player")
-                # old player/instance は worker closure が保持する。明示 release は行わず、
-                # 遅延 stop の影響を fresh player への差し替えと generation guard で隔離する。
-                # timeout が多発する環境では、old libVLC object が worker 完了まで残る。
-                log_message("[release] stale VLC player may remain until delayed stop finishes")
-                self._create_fresh_vlc_player()
-                return False
+            deadline = QtCore.QDateTime.currentMSecsSinceEpoch() + timeout_ms
+            while not done.wait(0):
+                # ウィンドウメッセージは処理し続ける。ただし、この間に発火する UI
+                # タイマーは _vlc_stop_in_progress を見て VLC への問い合わせを避ける。
+                QtWidgets.QApplication.processEvents(
+                    QtCore.QEventLoop.ExcludeUserInputEvents,
+                    50,
+                )
+                if QtCore.QDateTime.currentMSecsSinceEpoch() >= deadline:
+                    log_message(f"[release] VLC stop timed out: context={context}")
+                    diagnostics.record_breadcrumb(
+                        "vlc_release_timeout_recreate_player", context=context
+                    )
+                    # old player/instance は worker closure が保持する。明示 release は行わず、
+                    # 遅延 stop の影響を fresh player への差し替えと generation guard で隔離する。
+                    log_message("[release] stale VLC player may remain until delayed stop finishes")
+                    self._create_fresh_vlc_player()
+                    return False
 
-        # stop 完了をメインスレッドで確認してから、メインスレッドでメディアを解放する。
-        if self.vlc_player is vlc_player and self._vlc_generation == generation:
-            vlc_player.set_media(None, context="move_current_file_clear_media")
-            log_message("[release] VLC stop finished; media cleared")
-        else:
-            log_message("[release] player changed while releasing; skip clear_media")
-        return True
+            # stop 完了をメインスレッドで確認してから、メインスレッドでメディアを解放する。
+            if self.vlc_player is vlc_player and self._vlc_generation == generation:
+                vlc_player.set_media(None, context=f"{context}_clear_media")
+                log_message(f"[release] VLC stop finished; media cleared: context={context}")
+            else:
+                log_message("[release] player changed while releasing; skip clear_media")
+            return True
+        finally:
+            self._vlc_stop_in_progress = False
 
     def _current_file_path(self) -> str:
         if 0 <= self.current_index < len(self.directory_playlist):
@@ -1346,6 +1374,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     # ------------- ステータス更新 -------------
     def _update_status_time(self) -> None:
+        if self._vlc_stop_in_progress:
+            diagnostics.heartbeat()
+            return
         if not self.player:
             self._update_diagnostics_snapshot()
             return
@@ -1385,6 +1416,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self._update_diagnostics_snapshot()
 
     def _update_diagnostics_snapshot(self) -> None:
+        if self._vlc_stop_in_progress:
+            return
         current_path = self._current_file_path()
         try:
             player_state = str(self.vlc_player.get_state("")) if self.player else ""

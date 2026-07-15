@@ -519,9 +519,7 @@ def test_status_timer_does_not_query_vlc_while_stop_is_in_progress(player, monke
     assert calls == ["heartbeat"]
 
 
-def test_pending_track_timer_does_not_query_vlc_while_stop_is_in_progress(
-    player, monkeypatch
-):
+def test_pending_track_timer_does_not_query_vlc_while_stop_is_in_progress(player, monkeypatch):
     calls = []
     monkeypatch.setattr(
         player,

@@ -661,9 +661,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             log_message("play_at(): before non-blocking player.stop()")
             diagnostics.record_breadcrumb("play_at_before_player_stop", path=path)
-            stopped = self._stop_and_clear_media_without_blocking_ui(
-                context="play_at_player_stop"
-            )
+            stopped = self._stop_and_clear_media_without_blocking_ui(context="play_at_player_stop")
             if stopped:
                 log_message("play_at(): after non-blocking player.stop()")
                 diagnostics.record_breadcrumb("play_at_after_player_stop", path=path)

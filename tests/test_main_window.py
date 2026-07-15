@@ -507,6 +507,28 @@ def test_play_at_uses_non_blocking_stop_helper(player, monkeypatch):
     assert player.player.playing
 
 
+def test_play_at_does_not_reenter_while_vlc_stop_is_in_progress(player):
+    original_media = player.player.media
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+    player._vlc_stop_in_progress = True
+
+    player.play_at(1)
+
+    assert player.current_index == 0
+    assert player.player.media is original_media
+    assert player.vlc_instance.created_media == []
+    assert not player.player.playing
+
+
+def test_duplicate_stop_is_distinct_from_timeout(player):
+    player._vlc_stop_in_progress = True
+
+    result = player._stop_and_clear_media_without_blocking_ui()
+
+    assert result is None
+
+
 def test_status_timer_does_not_query_vlc_while_stop_is_in_progress(player, monkeypatch):
     calls = []
     monkeypatch.setattr(player.vlc_player, "get_time", lambda: calls.append("get_time"))

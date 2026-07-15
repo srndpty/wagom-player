@@ -642,6 +642,11 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def play_at(self, index: int) -> None:
         diagnostics.record_breadcrumb("play_at_requested", index=index)
 
+        if self._vlc_stop_in_progress:
+            log_message(f"play_at(): SKIP index={index} because VLC stop is in progress")
+            diagnostics.record_breadcrumb("play_at_ignored_during_vlc_stop", index=index)
+            return
+
         if not (0 <= index < len(self.directory_playlist)):
             log_message("play_at(): index out of range")
             return
@@ -662,6 +667,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
             log_message("play_at(): before non-blocking player.stop()")
             diagnostics.record_breadcrumb("play_at_before_player_stop", path=path)
             stopped = self._stop_and_clear_media_without_blocking_ui(context="play_at_player_stop")
+            if stopped is None:
+                # processEvents() 中の再入。現在の player は外側の stop が使用中なので
+                # media の設定や再生へ進んではならない。
+                self.current_index = old
+                log_message("play_at(): aborted because another VLC stop is in progress")
+                diagnostics.record_breadcrumb("play_at_aborted_during_vlc_stop", index=index)
+                return
             if stopped:
                 log_message("play_at(): after non-blocking player.stop()")
                 diagnostics.record_breadcrumb("play_at_after_player_stop", path=path)
@@ -1066,6 +1078,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def stop(self) -> None:
         diagnostics.record_breadcrumb("stop_requested")
         stopped = self._stop_and_clear_media_without_blocking_ui(context="stop_player_stop")
+        if stopped is None:
+            log_message("stop(): ignored because another VLC stop is in progress")
+            return
         if not stopped:
             log_message("stop(): VLC stop timed out; fresh player is now idle")
         self._apply_stopped_ui_state()
@@ -1225,13 +1240,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
         # UI（オーバーレイ・シークバー等）の後始末はメインスレッドで行う
         self._apply_stopped_ui_state()
         QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents)
-        return released
+        return released is True
 
     def _stop_and_clear_media_without_blocking_ui(
         self,
         timeout_ms: int = 8000,
         context: str = "move_current_file_stop",
-    ) -> bool:
+    ) -> Optional[bool]:
         """VLC の停止をワーカースレッドで行い、UI を固めずに完了を待つ。
 
         VLC の同期 ``stop()`` は埋め込みビデオウィンドウの破棄を伴い、その破棄完了を
@@ -1249,11 +1264,12 @@ class VideoPlayer(QtWidgets.QMainWindow):
         時は player 自体を差し替え、遅延した ``stop()`` の影響を古い player に閉じ込める。
 
         戻り値は stop 完了を確認できたら ``True``、``timeout_ms`` 以内に完了を確認
-        できなければ ``False``。
+        できなければ ``False``。別の stop が進行中なら ``None`` を返し、呼び出し側は
+        同じ player に対する後続処理を中止すること。
         """
         if self._vlc_stop_in_progress:
             log_message(f"[release] duplicate VLC stop ignored: context={context}")
-            return False
+            return None
 
         done = threading.Event()
         vlc_player = self.vlc_player

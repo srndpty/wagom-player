@@ -1,4 +1,5 @@
 import os
+import random
 import sys
 from collections.abc import Sequence
 from typing import Optional
@@ -86,8 +87,6 @@ class PlaybackController(TrackUiMixin, FileUiMixin, QtWidgets.QMainWindow):
 
     @shuffle_enabled.setter
     def shuffle_enabled(self, value: bool) -> None:
-        import random
-
         self.playlist_session.set_shuffle(bool(value), random.shuffle)
 
     @property
@@ -99,8 +98,6 @@ class PlaybackController(TrackUiMixin, FileUiMixin, QtWidgets.QMainWindow):
         if value:
             self.playlist_session.replace_shuffle_order(value)
         else:
-            import random
-
             self.playlist_session.set_shuffle(False, random.shuffle)
 
     def __getattr__(self, name):
@@ -366,12 +363,7 @@ class PlaybackController(TrackUiMixin, FileUiMixin, QtWidgets.QMainWindow):
             video_files = [file_path]
 
         self.directory_playlist = video_files
-
-        if self.shuffle_enabled:
-            # シャッフルが有効な状態で新しいディレクトリを開いたら、一度無効にする
-            self.shuffle_enabled = False
-            self.shuffled_playlist = []
-            self._update_shuffle_button()
+        self._update_shuffle_button()
 
         # 渡されたファイルがリストの何番目にあるかを探す
         try:
@@ -1303,28 +1295,28 @@ class PlaybackController(TrackUiMixin, FileUiMixin, QtWidgets.QMainWindow):
         self.btn_repeat.setChecked(self.repeat_enabled)
 
     def _on_shuffle_toggled(self, checked: bool) -> None:
-        self.shuffle_enabled = bool(checked)
-        self._create_or_clear_shuffled_playlist()
+        enabled = bool(checked)
+        log_message(
+            "シャッフルを有効にし、再生順を作成します。"
+            if enabled
+            else "シャッフルを無効にします。"
+        )
+        self.playlist_session.set_shuffle(enabled, random.shuffle)
         self._update_shuffle_button()
         self._update_window_title()
-
-    def _create_or_clear_shuffled_playlist(self):
-        """シャッフルリストを作成またはクリアする"""
-        import random
-
-        if self.shuffle_enabled and self.directory_playlist:
-            log_message("シャッフルを有効にし、再生順を作成します。")
-            self.playlist_session.set_shuffle(True, random.shuffle)
-        else:
-            log_message("シャッフルを無効にします。")
-            self.playlist_session.set_shuffle(False, random.shuffle)
 
     # _toggle_shuffleから_update_shuffle_buttonに名前を変更したものを流用
     def _update_shuffle_button(self):
         self.btn_shuffle.setIcon(
             self._icon_shuffle_on if self.shuffle_enabled else self._icon_shuffle_off
         )
-        self.btn_shuffle.setChecked(self.shuffle_enabled)
+        self.btn_shuffle.blockSignals(True)
+        try:
+            self.btn_shuffle.setChecked(self.shuffle_enabled)
+        finally:
+            self.btn_shuffle.blockSignals(False)
+        if hasattr(self, "act_shuffle"):
+            self.act_shuffle.setChecked(self.shuffle_enabled)
 
     def _toggle_mute(self) -> None:
         next_muted = not self._muted

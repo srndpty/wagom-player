@@ -15,13 +15,17 @@ def create_shuffled_playlist(
     current_index: int,
     shuffle_func: Callable[[MutableSequence[str]], None],
 ) -> list[str]:
-    if not 0 <= current_index < len(directory_playlist):
-        return []
-    current = directory_playlist[current_index]
     remaining = list(directory_playlist)
-    remaining.pop(current_index)
+    current = remaining.pop(current_index) if 0 <= current_index < len(remaining) else None
     shuffle_func(remaining)
-    return [current, *remaining]
+    return [current, *remaining] if current is not None else remaining
+
+
+def _validate_unique_paths(paths: Sequence[str]) -> list[str]:
+    candidate = list(paths)
+    if len(candidate) != len(set(candidate)):
+        raise ValueError("プレイリスト内のパスは一意である必要があります")
+    return candidate
 
 
 def adjacent_index(
@@ -68,7 +72,7 @@ def next_index_after_removal(
 
 
 class PlaylistSession:
-    """プレイリストと現在位置を一貫した状態として管理する。"""
+    """一意なパスのプレイリストと現在位置を一貫した状態として管理する。"""
 
     def __init__(
         self,
@@ -77,7 +81,7 @@ class PlaylistSession:
         shuffle_enabled: bool = False,
         shuffled_paths: Sequence[str] = (),
     ) -> None:
-        self._paths: list[str] = list(paths)
+        self._paths = _validate_unique_paths(paths)
         self._current_index = -1
         self._shuffle_enabled = False
         self._shuffled_paths: list[str] = []
@@ -119,7 +123,7 @@ class PlaylistSession:
         return self._current_index
 
     def replace_playlist(self, paths: Sequence[str]) -> None:
-        self._paths = list(paths)
+        self._paths = _validate_unique_paths(paths)
         self._current_index = -1
         self._shuffle_enabled = False
         self._shuffled_paths = []

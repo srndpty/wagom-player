@@ -114,6 +114,22 @@ def test_load_file_and_directory_collects_playlist_and_plays(player, tmp_path):
     assert player.windowTitle().startswith("[2/2] clip10.mp4")
 
 
+def test_load_file_and_directory_resets_shuffle_button(player, tmp_path):
+    old_file = tmp_path / "old.mp4"
+    new_file = tmp_path / "new.mp4"
+    old_file.write_text("", encoding="utf-8")
+    new_file.write_text("", encoding="utf-8")
+    player.directory_playlist = [str(old_file)]
+    player.current_index = 0
+    player._on_shuffle_toggled(True)
+
+    player._load_file_and_directory(str(new_file))
+
+    assert not player.shuffle_enabled
+    assert not player.btn_shuffle.isChecked()
+    assert not player.act_shuffle.isChecked()
+
+
 def test_open_external_file_ignores_missing_and_duplicate(player, tmp_path, monkeypatch):
     loaded = []
     file_path = tmp_path / "movie.mp4"
@@ -462,7 +478,13 @@ def test_slider_handlers_set_player_time_and_status(player):
 def test_repeat_and_shuffle_toggles(player, monkeypatch):
     player.directory_playlist = ["a.mp4", "b.mp4", "c.mp4"]
     player.current_index = 1
-    monkeypatch.setattr("random.shuffle", lambda items: items.reverse())
+    shuffle_calls = []
+
+    def reverse_shuffle(items):
+        shuffle_calls.append(list(items))
+        items.reverse()
+
+    monkeypatch.setattr("random.shuffle", reverse_shuffle)
 
     player._on_repeat_toggled(True)
     assert player.repeat_enabled
@@ -472,9 +494,11 @@ def test_repeat_and_shuffle_toggles(player, monkeypatch):
     assert player.shuffle_enabled
     assert player.shuffled_playlist == ["b.mp4", "c.mp4", "a.mp4"]
     assert player.btn_shuffle.isChecked()
+    assert len(shuffle_calls) == 1
 
     player._on_shuffle_toggled(False)
     assert player.shuffled_playlist == []
+    assert len(shuffle_calls) == 1
 
 
 def test_play_next_previous_and_media_end_schedule_expected_indices(player, monkeypatch):

@@ -1,3 +1,5 @@
+import pytest
+
 from wagom_player.domain.playlist import (
     PlaylistSession,
     active_playlist,
@@ -25,9 +27,11 @@ def test_create_shuffled_playlist_keeps_current_item_first():
     assert shuffled == ["b.mp4", "c.mp4", "a.mp4"]
 
 
-def test_create_shuffled_playlist_returns_empty_for_invalid_current_index():
-    assert create_shuffled_playlist(["a.mp4"], -1, lambda items: None) == []
-    assert create_shuffled_playlist(["a.mp4"], 1, lambda items: None) == []
+def test_create_shuffled_playlist_shuffles_all_items_without_current_selection():
+    assert create_shuffled_playlist(["a.mp4", "b.mp4"], -1, lambda items: items.reverse()) == [
+        "b.mp4",
+        "a.mp4",
+    ]
 
 
 def test_create_shuffled_playlist_preserves_duplicate_paths():
@@ -104,3 +108,25 @@ def test_playlist_session_does_not_expose_mutable_internal_lists():
     assert session.paths == ["a.mp4", "b.mp4"]
     assert not session.select(2)
     assert session.current_index == 0
+
+
+def test_playlist_session_keeps_items_active_when_shuffle_starts_without_selection():
+    session = PlaylistSession(["a.mp4", "b.mp4"], 1)
+    session.remove_current()
+
+    assert session.paths == ["a.mp4"]
+    assert session.current_index == -1
+
+    session.set_shuffle(True, lambda items: None)
+
+    assert session.active_paths() == ["a.mp4"]
+
+
+def test_playlist_session_rejects_duplicate_paths():
+    with pytest.raises(ValueError, match="一意"):
+        PlaylistSession(["same.mp4", "same.mp4"])
+
+    session = PlaylistSession(["original.mp4"])
+    with pytest.raises(ValueError, match="一意"):
+        session.replace_playlist(["same.mp4", "same.mp4"])
+    assert session.paths == ["original.mp4"]

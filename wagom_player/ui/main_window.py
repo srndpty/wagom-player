@@ -477,6 +477,20 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.vlc_player = VlcPlayerAdapter(self.player)
         self._bind_video_surface()
         self._attach_vlc_events(self._next_vlc_generation())
+        # stop タイムアウト後も、ユーザーが設定した再生状態を引き継ぐ。特に
+        # ミュートを復元せずに次の動画を再生すると意図しない音声出力になる。
+        self.vlc_player.audio_set_volume(
+            int(self.volume_slider.value()),
+            context="fresh_player_audio_set_volume",
+        )
+        self.vlc_player.audio_set_mute(
+            bool(self._muted),
+            context="fresh_player_audio_set_mute",
+        )
+        self.vlc_player.set_rate(
+            self.playback_rate,
+            context="fresh_player_set_rate",
+        )
 
     def _on_vlc_end_for_generation(self, event, generation: int) -> None:
         if generation != self._vlc_generation:
@@ -539,6 +553,22 @@ class VideoPlayer(QtWidgets.QMainWindow):
             )
 
             def _restart_current() -> None:
+                if (
+                    self._vlc_stop_in_progress
+                    or self._is_changing_media
+                    or self._file_operation_in_progress
+                ):
+                    log_message("_restart_current(): ignored during VLC/file transition")
+                    diagnostics.record_breadcrumb("restart_current_ignored_during_transition")
+                    return
+                if not self.repeat_enabled or self._current_file_path() != path:
+                    log_message("_restart_current(): ignored because repeat target changed")
+                    diagnostics.record_breadcrumb(
+                        "restart_current_ignored_stale_target",
+                        scheduled_path=path,
+                        current_path=self._current_file_path(),
+                    )
+                    return
                 try:
                     # VLC の状態をログしておくと後で分析しやすい
                     try:

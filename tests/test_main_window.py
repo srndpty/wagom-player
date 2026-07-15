@@ -72,6 +72,18 @@ def test_create_fresh_vlc_player_rebinds_video_surface(player):
     assert len(player.player.events.attached) == 2
 
 
+def test_create_fresh_vlc_player_restores_audio_and_rate(player):
+    player.volume_slider.setValue(37)
+    player._muted = True
+    player.playback_rate = 1.75
+
+    player._create_fresh_vlc_player()
+
+    assert player.player.volume == 37
+    assert player.player.muted
+    assert player.player.rate == 1.75
+
+
 def test_stale_vlc_event_callback_is_ignored_after_fresh_player(player, monkeypatch):
     old_callback = player.player.events.attached[0][1]
     calls = []
@@ -487,6 +499,44 @@ def test_media_end_repeat_reloads_current_media(player, monkeypatch):
     assert player.player.media.path == "a.mp4"
     assert player.player.playing
     assert player.seek_slider.maximum() == 0
+
+
+def test_pending_repeat_restart_does_not_touch_vlc_during_stop(player, monkeypatch):
+    callbacks = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    player.directory_playlist = ["a.mp4"]
+    player.current_index = 0
+    player.repeat_enabled = True
+
+    player._on_media_end()
+    player._vlc_stop_in_progress = True
+    callbacks[0]()
+
+    assert player.vlc_instance.created_media == []
+    assert player.player.played == 0
+
+
+def test_pending_repeat_restart_ignores_stale_media_target(player, monkeypatch):
+    callbacks = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+    player.repeat_enabled = True
+
+    player._on_media_end()
+    player.current_index = 1
+    callbacks[0]()
+
+    assert player.vlc_instance.created_media == []
+    assert player.player.played == 0
 
 
 def test_play_at_uses_non_blocking_stop_helper(player, monkeypatch):

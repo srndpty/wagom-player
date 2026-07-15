@@ -21,6 +21,8 @@ class FileOperationController:
         subfolder_name: str,
         resolution: CollisionResolution,
     ) -> FileActionResult:
+        if resolution == CollisionResolution.CANCEL:
+            return FileActionResult(file_path, None, resolution)
         if resolution == CollisionResolution.DISCARD:
             self._trash.discard(file_path)
             return FileActionResult(file_path, None, resolution)
@@ -31,9 +33,11 @@ class FileOperationController:
                 retry_delays=self.RETRY_DELAYS,
             )
             return FileActionResult(file_path, target, resolution)
-        target = move_file_to_subfolder(
-            file_path,
-            subfolder_name,
-            retry_delays=self.RETRY_DELAYS,
-        )
-        return FileActionResult(file_path, target, resolution)
+        if resolution == CollisionResolution.MOVE:
+            target = move_file_to_subfolder(
+                file_path,
+                subfolder_name,
+                retry_delays=self.RETRY_DELAYS,
+            )
+            return FileActionResult(file_path, target, resolution)
+        raise ValueError(f"未対応の解決方法です: {resolution}")

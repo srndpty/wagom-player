@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from wagom_player.domain import playlist
+from wagom_player.infrastructure import media_files as playlist
 
 
 class WindowsLogicalKeyTest(unittest.TestCase):

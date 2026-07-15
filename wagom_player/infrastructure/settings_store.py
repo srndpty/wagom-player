@@ -20,7 +20,7 @@ class SettingsRepository:
     """プレイヤー設定をQSettingsへ保存する境界。"""
 
     def __init__(self, settings: Optional[QtCore.QSettings] = None):
-        self._settings = settings or QtCore.QSettings()
+        self._settings = settings if settings is not None else QtCore.QSettings()
 
     def load(self) -> PlayerSettings:
         return PlayerSettings(

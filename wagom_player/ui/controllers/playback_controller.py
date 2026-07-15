@@ -1,15 +1,16 @@
 import os
 import sys
+from collections.abc import Sequence
 from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ...domain.formatting import format_ms
-from ...domain.playlist import SUPPORTED_VIDEO_EXTENSIONS, PlaylistSession
+from ...domain.playlist import PlaylistSession
 from ...domain.window_title import build_window_title
 from ...infrastructure import diagnostics, vlc_backend
 from ...infrastructure.logger import log_message
-from ...infrastructure.media_files import collect_video_files
+from ...infrastructure.media_files import SUPPORTED_VIDEO_EXTENSIONS, collect_video_files
 from ...infrastructure.settings_store import PlayerSettings, SettingsRepository
 from ...infrastructure.trash import TrashService
 from ...infrastructure.windows_integration import apply_windows_dark_titlebar
@@ -61,36 +62,46 @@ class PlaybackController(TrackUiMixin, FileUiMixin, QtWidgets.QMainWindow):
     }
 
     @property
-    def directory_playlist(self):
+    def directory_playlist(self) -> list[str]:
         return self.playlist_session.paths
 
     @directory_playlist.setter
-    def directory_playlist(self, value):
-        self.playlist_session.paths = value
+    def directory_playlist(self, value: Sequence[str]) -> None:
+        self.playlist_session.replace_playlist(value)
 
     @property
-    def current_index(self):
+    def current_index(self) -> int:
         return self.playlist_session.current_index
 
     @current_index.setter
-    def current_index(self, value):
-        self.playlist_session.current_index = value
+    def current_index(self, value: int) -> None:
+        if value == -1:
+            self.playlist_session.clear_selection()
+        elif not self.playlist_session.select(value):
+            raise ValueError(f"現在位置が範囲外です: {value}")
 
     @property
-    def shuffle_enabled(self):
+    def shuffle_enabled(self) -> bool:
         return self.playlist_session.shuffle_enabled
 
     @shuffle_enabled.setter
-    def shuffle_enabled(self, value):
-        self.playlist_session.shuffle_enabled = value
+    def shuffle_enabled(self, value: bool) -> None:
+        import random
+
+        self.playlist_session.set_shuffle(bool(value), random.shuffle)
 
     @property
-    def shuffled_playlist(self):
+    def shuffled_playlist(self) -> list[str]:
         return self.playlist_session.shuffled_paths
 
     @shuffled_playlist.setter
-    def shuffled_playlist(self, value):
-        self.playlist_session.shuffled_paths = value
+    def shuffled_playlist(self, value: Sequence[str]) -> None:
+        if value:
+            self.playlist_session.replace_shuffle_order(value)
+        else:
+            import random
+
+            self.playlist_session.set_shuffle(False, random.shuffle)
 
     def __getattr__(self, name):
         view = self.__dict__.get("view")

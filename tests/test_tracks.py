@@ -8,6 +8,14 @@ def test_language_normalization_and_detection():
     assert language_key("Commentary") == ""
 
 
+def test_language_normalization_accepts_locale_variants():
+    assert normalize_language("en_US") == "en"
+    assert normalize_language("en-US") == "en"
+    assert normalize_language("JA_jp") == "ja"
+    assert normalize_language("") == "ja"
+    assert normalize_language("xx") == "xx"
+
+
 def test_find_track_returns_matching_language_only():
     tracks = [(1, "日本語"), (2, "English"), (3, "Commentary")]
 

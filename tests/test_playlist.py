@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from wagom_player.domain import playlist
+from wagom_player.infrastructure import media_files as playlist
 from wagom_player.infrastructure.media_files import collect_video_files
 
 

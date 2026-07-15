@@ -1,10 +1,8 @@
-# ruff: noqa: F401
 import os
-import sys
 import threading
 from typing import Optional
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from ...application.file_actions import (
     CollisionResolution,
@@ -13,41 +11,9 @@ from ...application.file_actions import (
     target_path_for_subfolder,
     validate_move_to_subfolder,
 )
-from ...domain.formatting import format_ms
-from ...domain.playlist import SUPPORTED_VIDEO_EXTENSIONS, PlaylistSession
 from ...domain.playlist import next_path as next_playlist_path
-from ...domain.window_title import build_window_title
-from ...infrastructure import diagnostics, vlc_backend
+from ...infrastructure import diagnostics
 from ...infrastructure.logger import log_message
-from ...infrastructure.media_files import collect_video_files
-from ...infrastructure.settings_store import PlayerSettings, SettingsRepository
-from ...infrastructure.trash import TrashService
-from ...infrastructure.windows_integration import apply_windows_dark_titlebar
-from ..dialogs import MetadataDialog, ShortcutListDialog
-from ..overlay import OverlayLabel
-from ..player_view import apply_control_icons, build_player_view
-from ..shortcut_binder import bind_shortcuts
-from ..shortcuts import SHORTCUT_ROWS
-from ..styles import (
-    SEEK_SLIDER_STYLE_NORMAL,
-    SEEK_SLIDER_STYLE_WARNING,
-)
-from .file_operation_controller import FileOperationController
-from .track_controller import TrackController
-
-vlc = vlc_backend.vlc
-VlcEvents = vlc_backend.VlcEvents
-VlcPlayerAdapter = vlc_backend.VlcPlayerAdapter
-
-try:
-    from send2trash import send2trash
-except ImportError:
-    send2trash = None  # type: ignore[assignment]
-
-
-def _create_vlc_instance() -> "vlc.Instance":
-    vlc_backend.vlc = vlc
-    return vlc_backend.create_vlc_instance()
 
 
 class FileUiMixin:

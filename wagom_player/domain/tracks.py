@@ -18,13 +18,14 @@ LANGUAGE_ALIASES = {
 
 
 def normalize_language(value: object, default: str = "ja") -> str:
-    normalized = str(value or "").strip().casefold()
+    normalized = str(value or "").strip().casefold().replace("_", "-")
     if not normalized:
         return default
+    base_language = normalized.split("-", 1)[0]
     for language, aliases in LANGUAGE_ALIASES.items():
-        if normalized == language or normalized in aliases:
+        if base_language == language or base_language in aliases:
             return language
-    return normalized
+    return base_language
 
 
 def language_key(name: str) -> str:

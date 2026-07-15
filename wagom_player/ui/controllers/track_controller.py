@@ -16,8 +16,7 @@ class TrackController:
         self._subtitle_tracks = subtitle_tracks
 
     def normalize_language(self, value: object) -> str:
-        normalized = normalize_language(value)
-        return normalized.split("-", 1)[0]
+        return normalize_language(value)
 
     def language_key(self, name: str) -> str:
         return language_key(name)

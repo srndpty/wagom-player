@@ -16,9 +16,14 @@ def create_shuffled_playlist(
     shuffle_func: Callable[[MutableSequence[str]], None],
 ) -> list[str]:
     remaining = list(directory_playlist)
-    current = remaining.pop(current_index) if 0 <= current_index < len(remaining) else None
+    if current_index == -1:
+        shuffle_func(remaining)
+        return remaining
+    if not 0 <= current_index < len(remaining):
+        return []
+    current = remaining.pop(current_index)
     shuffle_func(remaining)
-    return [current, *remaining] if current is not None else remaining
+    return [current, *remaining]
 
 
 def _validate_unique_paths(paths: Sequence[str]) -> list[str]:
@@ -148,12 +153,21 @@ class PlaylistSession:
         enabled: bool,
         shuffle_func: Callable[[MutableSequence[str]], None],
     ) -> None:
-        self._shuffle_enabled = enabled
-        self._shuffled_paths = (
-            create_shuffled_playlist(self._paths, self._current_index, shuffle_func)
-            if enabled
-            else []
+        if not enabled:
+            self._shuffle_enabled = False
+            self._shuffled_paths = []
+            return
+
+        candidate = create_shuffled_playlist(
+            self._paths,
+            self._current_index,
+            shuffle_func,
         )
+        if sorted(candidate) != sorted(self._paths):
+            raise ValueError("シャッフル順は元のプレイリストと同じ項目を含む必要があります")
+
+        self._shuffle_enabled = True
+        self._shuffled_paths = candidate
 
     def replace_shuffle_order(self, paths: Sequence[str]) -> None:
         candidate = list(paths)

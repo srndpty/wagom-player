@@ -111,11 +111,14 @@ class FileUiMixin:
         finally:
             self._vlc_stop_in_progress = False
 
-    def _prompt_target_file_exists(self, file_name: str, subfolder_name: str) -> str:
+    def _prompt_target_file_exists(
+        self,
+        file_name: str,
+        subfolder_name: str,
+    ) -> CollisionResolution:
         """移動先に同名ファイルがある場合の対応をユーザーに尋ねる。
 
-        戻り値は ``"delete"``（現在のファイルを削除） / ``"rename"``（別名で移動
-        保存） / ``"cancel"``（何もしない）のいずれか。
+        現在のファイルを破棄、別名で移動、キャンセルのいずれかを返す。
         """
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Warning)
@@ -148,11 +151,6 @@ class FileUiMixin:
             return CollisionResolution.RENAME
         log_message("[DEBUG move] dialog choice = cancel")
         return CollisionResolution.CANCEL
-
-    def _discard_current_file(self, file_path: str) -> None:
-        """現在のファイルをごみ箱へ移動する。ごみ箱が使えない場合は削除しない。"""
-        self.trash_service.discard(file_path)
-        log_message(f"移動先に同名ファイルがあるため、ごみ箱へ移動しました: '{file_path}'")
 
     def _move_current_file_and_play_next(self, subfolder_name: str):
         """現在再生中のファイルを指定されたサブフォルダに移動し、次の曲を再生する"""
@@ -187,16 +185,12 @@ class FileUiMixin:
 
             # --- ファイルパスの準備 ---
             file_name = os.path.basename(current_file_path)
-            # 移動先に同名ファイルがあった場合の解決方法。
-            #   None     : 通常移動
-            #   "rename" : 別名で移動保存
-            #   "delete" : 現在のファイルをごみ箱へ移動（移動はしない）
-            collision_resolution = None
+            collision_resolution: Optional[CollisionResolution] = None
             try:
                 target_file_path = validate_move_to_subfolder(current_file_path, subfolder_name)
             except TargetFileExistsError:
                 existing_target = target_path_for_subfolder(current_file_path, subfolder_name)
-                log_message(f"File '{file_name}' already exists in target directory. Asking user.")
+                log_message(f"移動先に同名ファイルが存在するため確認します: '{file_name}'")
                 diagnostics.record_breadcrumb(
                     "move_current_file_target_exists", target=existing_target
                 )
@@ -205,8 +199,8 @@ class FileUiMixin:
                     "move_current_file_collision_choice", choice=collision_resolution
                 )
                 target_file_path = None  # 実際の移動先は解決方法に応じて後で決める
-                if collision_resolution not in ("rename", "delete"):  # "cancel"
-                    log_message(f"Move of '{file_name}' cancelled by user (target exists).")
+                if collision_resolution == CollisionResolution.CANCEL:
+                    log_message(f"ユーザーがファイル移動をキャンセルしました: '{file_name}'")
                     self._show_status_message("移動をキャンセルしました", 4000)
                     return
             except (FileNotFoundError, InvalidMoveTargetError) as e:
@@ -228,17 +222,34 @@ class FileUiMixin:
 
             # --- 移動（または削除）処理 ---
             try:
-                if collision_resolution == "delete":
-                    try:
-                        self._discard_current_file(current_file_path)
-                    except Exception as e:
-                        log_message(f"ごみ箱への移動に失敗しました: {e}")
-                        self._show_status_message(
-                            f"ごみ箱への移動に失敗: {e}（再生は停止しました）",
-                            5000,
-                        )
-                        diagnostics.record_breadcrumb("move_current_file_trash_error", error=str(e))
-                        return
+                resolution = (
+                    collision_resolution
+                    if collision_resolution is not None
+                    else CollisionResolution.MOVE
+                )
+                try:
+                    result = self.file_operation_controller.execute(
+                        current_file_path,
+                        subfolder_name,
+                        resolution,
+                    )
+                except Exception as e:
+                    if resolution != CollisionResolution.DISCARD:
+                        raise
+                    log_message(f"ごみ箱への移動に失敗しました: {e}")
+                    self._show_status_message(
+                        f"ごみ箱への移動に失敗: {e}（再生は停止しました）",
+                        5000,
+                    )
+                    diagnostics.record_breadcrumb("move_current_file_trash_error", error=str(e))
+                    return
+
+                target_file_path = result.target_path
+                if resolution == CollisionResolution.DISCARD:
+                    log_message(
+                        f"移動先に同名ファイルがあるため、ごみ箱へ移動しました: "
+                        f"'{current_file_path}'"
+                    )
                     self._show_status_message(
                         f"ごみ箱へ移動: {file_name}（移動先に同名ファイルが存在）",
                         4000,
@@ -246,37 +257,22 @@ class FileUiMixin:
                     diagnostics.record_breadcrumb(
                         "move_current_file_source_discarded", source=current_file_path
                     )
-                elif collision_resolution == CollisionResolution.RENAME:
-                    log_message(
-                        f"Attempting to move '{file_name}' to '{subfolder_name}' "
-                        "folder under a unique name."
-                    )
-                    result = self.file_operation_controller.execute(
-                        current_file_path,
-                        subfolder_name,
-                        CollisionResolution.RENAME,
-                    )
-                    target_file_path = result.target_path
+                elif resolution == CollisionResolution.RENAME:
+                    log_message(f"別名でファイルを移動します: '{file_name}' -> '{subfolder_name}'")
                     moved_name = os.path.basename(target_file_path)
                     self._show_status_message(
                         f"別名で移動完了: {file_name} -> {subfolder_name}/{moved_name}", 4000
                     )
-                    log_message(f"Successfully moved file to '{target_file_path}'")
+                    log_message(f"ファイルを移動しました: '{target_file_path}'")
                     diagnostics.record_breadcrumb(
                         "move_current_file_success",
                         source=current_file_path,
                         target=target_file_path,
                     )
                 else:
-                    log_message(f"Attempting to move '{file_name}' to '{subfolder_name}' folder.")
-                    result = self.file_operation_controller.execute(
-                        current_file_path,
-                        subfolder_name,
-                        CollisionResolution.MOVE,
-                    )
-                    target_file_path = result.target_path
+                    log_message(f"ファイルを移動します: '{file_name}' -> '{subfolder_name}'")
                     self._show_status_message(f"移動完了: {file_name} -> {subfolder_name}", 4000)
-                    log_message(f"Successfully moved file to '{target_file_path}'")
+                    log_message(f"ファイルを移動しました: '{target_file_path}'")
                     diagnostics.record_breadcrumb(
                         "move_current_file_success",
                         source=current_file_path,
@@ -284,9 +280,7 @@ class FileUiMixin:
                     )
 
             except TargetFileExistsError:
-                log_message(
-                    f"File '{file_name}' already exists in target directory. Skipping move."
-                )
+                log_message(f"移動先に同名ファイルが存在するため移動しません: '{file_name}'")
                 self._show_status_message(f"移動失敗: {file_name}は移動先に既に存在します", 5000)
                 diagnostics.record_breadcrumb(
                     "move_current_file_target_exists", target=target_file_path

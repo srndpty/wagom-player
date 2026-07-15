@@ -5,7 +5,9 @@ import threading
 import pytest
 
 from tests.fakes.vlc import FakeVlc
+from wagom_player.application.file_actions import CollisionResolution
 from wagom_player.infrastructure.trash import TrashService
+from wagom_player.ui.controllers.file_operation_controller import FileOperationController
 
 QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
@@ -20,6 +22,8 @@ def player(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(main_window, "vlc", fake_vlc)
     monkeypatch.setattr(main_window.diagnostics, "start_heartbeat_timer", lambda parent: None)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    QtCore.QSettings.setDefaultFormat(QtCore.QSettings.IniFormat)
+    QtCore.QSettings.setPath(QtCore.QSettings.IniFormat, QtCore.QSettings.UserScope, str(tmp_path))
     qapp.setOrganizationName("wagom-player-tests")
     qapp.setApplicationName("wagom-player-tests")
     QtCore.QSettings().clear()
@@ -696,7 +700,7 @@ def test_move_current_file_target_exists_cancel_keeps_playlist_and_playback(play
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player.player.playing = True
-    player._prompt_target_file_exists = lambda *args, **kwargs: "cancel"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.CANCEL
 
     player._move_current_file_and_play_next("_ok")
 
@@ -720,10 +724,11 @@ def test_move_current_file_target_exists_delete_sends_source_to_trash(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.DISCARD
     # 実際のごみ箱を汚さないよう、TrashService を fake に差し替える
     trashed = []
     player.trash_service = TrashService(lambda path: trashed.append(path))
+    player.file_operation_controller = FileOperationController(player.trash_service)
     calls = []
     monkeypatch.setattr(
         main_window.QtCore.QTimer,
@@ -753,10 +758,11 @@ def test_move_current_file_target_exists_delete_keeps_playlist_when_trash_fails(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.DISCARD
     player.trash_service = TrashService(
         lambda path: (_ for _ in ()).throw(RuntimeError("trash failed"))
     )
+    player.file_operation_controller = FileOperationController(player.trash_service)
     calls = []
     monkeypatch.setattr(player, "play_at", calls.append)
 
@@ -779,9 +785,10 @@ def test_move_current_file_target_exists_delete_does_not_fall_back_to_remove(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.DISCARD
     # ごみ箱が無い環境では完全削除にフォールバックしない
     player.trash_service = TrashService(None)
+    player.file_operation_controller = FileOperationController(player.trash_service)
 
     player._move_current_file_and_play_next("_ok")
 
@@ -874,7 +881,7 @@ def test_move_current_file_target_exists_rename_saves_with_unique_name(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "rename"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.RENAME
     calls = []
     monkeypatch.setattr(
         main_window.QtCore.QTimer,

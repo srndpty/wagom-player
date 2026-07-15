@@ -3,8 +3,8 @@ from PyQt5 import QtCore
 from wagom_player.infrastructure.settings_store import PlayerSettings, SettingsRepository
 
 
-def test_settings_repository_round_trip(qapp):
-    raw = QtCore.QSettings("wagom-player-tests", "settings-round-trip")
+def test_settings_repository_round_trip(qapp, tmp_path):
+    raw = QtCore.QSettings(str(tmp_path / "settings.ini"), QtCore.QSettings.IniFormat)
     raw.clear()
     repository = SettingsRepository(raw)
     expected = PlayerSettings(
@@ -21,11 +21,14 @@ def test_settings_repository_round_trip(qapp):
     repository.save(expected)
 
     assert repository.load() == expected
+    assert raw.value("volume", type=int) == 42
+    assert raw.value("preferred_audio_language") == "en"
+    assert raw.value("subtitle_enabled", type=bool)
     raw.clear()
 
 
-def test_settings_repository_recovers_invalid_volume(qapp):
-    raw = QtCore.QSettings("wagom-player-tests", "settings-invalid-volume")
+def test_settings_repository_recovers_invalid_volume(qapp, tmp_path):
+    raw = QtCore.QSettings(str(tmp_path / "settings.ini"), QtCore.QSettings.IniFormat)
     raw.setValue("volume", "invalid")
 
     assert SettingsRepository(raw).load().volume == 80

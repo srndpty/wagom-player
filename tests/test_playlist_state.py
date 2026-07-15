@@ -34,6 +34,10 @@ def test_create_shuffled_playlist_shuffles_all_items_without_current_selection()
     ]
 
 
+def test_create_shuffled_playlist_rejects_out_of_range_current_index():
+    assert create_shuffled_playlist(["a.mp4"], 1, lambda items: None) == []
+
+
 def test_create_shuffled_playlist_preserves_duplicate_paths():
     shuffled = create_shuffled_playlist(
         ["same.mp4", "same.mp4", "other.mp4"],
@@ -130,3 +134,26 @@ def test_playlist_session_rejects_duplicate_paths():
     with pytest.raises(ValueError, match="一意"):
         session.replace_playlist(["same.mp4", "same.mp4"])
     assert session.paths == ["original.mp4"]
+
+
+def test_set_shuffle_preserves_state_when_shuffle_function_fails():
+    session = PlaylistSession(["a.mp4", "b.mp4"], 0)
+
+    def fail(_items):
+        raise RuntimeError("shuffle failed")
+
+    with pytest.raises(RuntimeError, match="shuffle failed"):
+        session.set_shuffle(True, fail)
+
+    assert not session.shuffle_enabled
+    assert session.active_paths() == ["a.mp4", "b.mp4"]
+
+
+def test_set_shuffle_rejects_invalid_shuffle_result():
+    session = PlaylistSession(["a.mp4", "b.mp4"], 0)
+
+    with pytest.raises(ValueError, match="同じ項目"):
+        session.set_shuffle(True, lambda items: items.clear())
+
+    assert not session.shuffle_enabled
+    assert session.active_paths() == ["a.mp4", "b.mp4"]

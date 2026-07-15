@@ -72,6 +72,18 @@ def test_create_fresh_vlc_player_rebinds_video_surface(player):
     assert len(player.player.events.attached) == 2
 
 
+def test_create_fresh_vlc_player_restores_audio_and_rate(player):
+    player.volume_slider.setValue(37)
+    player._muted = True
+    player.playback_rate = 1.75
+
+    player._create_fresh_vlc_player()
+
+    assert player.player.volume == 37
+    assert player.player.muted
+    assert player.player.rate == 1.75
+
+
 def test_stale_vlc_event_callback_is_ignored_after_fresh_player(player, monkeypatch):
     old_callback = player.player.events.attached[0][1]
     calls = []
@@ -195,6 +207,29 @@ def test_playback_controls_seek_rate_volume_and_mute(player):
     assert player.volume_slider.value() == 100
     player._toggle_mute()
     assert player._muted
+
+
+def test_stop_preserves_current_media(player):
+    original_media = player.player.media
+
+    player.stop()
+
+    assert player.player.stopped == 1
+    assert player.player.media is original_media
+
+
+def test_toggle_play_reloads_current_file_when_player_has_no_media(player, monkeypatch):
+    calls = []
+    player.directory_playlist = ["a.mp4"]
+    player.current_index = 0
+    player.player.state = "NothingSpecial"
+    player.player.media = None
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player.toggle_play()
+
+    assert calls == [0]
+    assert player.player.played == 0
 
 
 def test_frame_step_falls_back_when_fps_is_unavailable(player):
@@ -487,6 +522,117 @@ def test_media_end_repeat_reloads_current_media(player, monkeypatch):
     assert player.player.media.path == "a.mp4"
     assert player.player.playing
     assert player.seek_slider.maximum() == 0
+
+
+def test_pending_repeat_restart_does_not_touch_vlc_during_stop(player, monkeypatch):
+    callbacks = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    player.directory_playlist = ["a.mp4"]
+    player.current_index = 0
+    player.repeat_enabled = True
+
+    player._on_media_end()
+    player._vlc_stop_in_progress = True
+    callbacks[0]()
+
+    assert player.vlc_instance.created_media == []
+    assert player.player.played == 0
+
+
+def test_pending_repeat_restart_ignores_stale_media_target(player, monkeypatch):
+    callbacks = []
+    monkeypatch.setattr(
+        main_window.QtCore.QTimer,
+        "singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+    player.repeat_enabled = True
+
+    player._on_media_end()
+    player.current_index = 1
+    callbacks[0]()
+
+    assert player.vlc_instance.created_media == []
+    assert player.player.played == 0
+
+
+def test_play_at_uses_non_blocking_stop_helper(player, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        player,
+        "_stop_and_clear_media_without_blocking_ui",
+        lambda **kwargs: calls.append(kwargs) or True,
+    )
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+
+    player.play_at(1)
+
+    assert calls == [{"context": "play_at_player_stop"}]
+    assert player.current_index == 1
+    assert player.player.media.path == "b.mp4"
+    assert player.player.playing
+
+
+def test_play_at_does_not_reenter_while_vlc_stop_is_in_progress(player):
+    original_media = player.player.media
+    player.directory_playlist = ["a.mp4", "b.mp4"]
+    player.current_index = 0
+    player._vlc_stop_in_progress = True
+
+    player.play_at(1)
+
+    assert player.current_index == 0
+    assert player.player.media is original_media
+    assert player.vlc_instance.created_media == []
+    assert not player.player.playing
+
+
+def test_duplicate_stop_is_distinct_from_timeout(player):
+    player._vlc_stop_in_progress = True
+
+    result = player._stop_and_clear_media_without_blocking_ui()
+
+    assert result is None
+
+
+def test_status_timer_does_not_query_vlc_while_stop_is_in_progress(player, monkeypatch):
+    calls = []
+    monkeypatch.setattr(player.vlc_player, "get_time", lambda: calls.append("get_time"))
+    monkeypatch.setattr(player.vlc_player, "get_length", lambda: calls.append("get_length"))
+    monkeypatch.setattr(main_window.diagnostics, "heartbeat", lambda: calls.append("heartbeat"))
+    player._vlc_stop_in_progress = True
+
+    player._update_status_time()
+
+    assert calls == ["heartbeat"]
+
+
+def test_pending_track_timer_does_not_query_vlc_while_stop_is_in_progress(player, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        player,
+        "_apply_preferred_audio_track",
+        lambda **kwargs: calls.append("audio") or True,
+    )
+    monkeypatch.setattr(
+        player,
+        "_apply_preferred_subtitle_track",
+        lambda **kwargs: calls.append("subtitle") or True,
+    )
+    player._pending_audio_language_apply = True
+    player._pending_subtitle_apply = True
+    player._vlc_stop_in_progress = True
+
+    player._apply_preferred_tracks_if_pending(player._track_apply_generation)
+
+    assert calls == []
 
 
 def test_move_current_file_updates_playlist_without_real_play(player, tmp_path, monkeypatch):

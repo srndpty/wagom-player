@@ -61,6 +61,9 @@ class VlcPlayerAdapter:
             )
         )
 
+    def get_media(self) -> Any:
+        return self.call("vlc_get_media", self._player.get_media, default=None)
+
     def set_time(self, value: int, context: str = "vlc_set_time", **fields: Any) -> bool:
         return self._ok_unless_false_or_minus_one(
             self.call(

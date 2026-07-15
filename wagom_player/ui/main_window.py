@@ -1090,10 +1090,16 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def toggle_play(self) -> None:
         """再生/一時停止を切り替える。停止状態からの再開も考慮する。"""
         player_state = self.vlc_player.get_state()
-        diagnostics.record_breadcrumb("toggle_play", player_state=str(player_state))
+        has_media = self.vlc_player.get_media() is not None
+        diagnostics.record_breadcrumb(
+            "toggle_play",
+            player_state=str(player_state),
+            has_media=has_media,
+        )
 
-        # プレイヤーが完全に停止または終了している場合
-        if player_state in (vlc.State.Stopped, vlc.State.Ended, vlc.State.Error):
+        # プレイヤーが完全に停止・終了している場合、または stop タイムアウトで
+        # fresh player に差し替わりメディアが空の場合は、現在動画を読み直す。
+        if not has_media or player_state in (vlc.State.Stopped, vlc.State.Ended, vlc.State.Error):
             # 再生可能なファイルがプレイリストにあれば、現在のファイルを最初から再生する
             if 0 <= self.current_index < len(self.directory_playlist):
                 self.play_at(self.current_index)
@@ -1107,7 +1113,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
     def stop(self) -> None:
         diagnostics.record_breadcrumb("stop_requested")
-        stopped = self._stop_and_clear_media_without_blocking_ui(context="stop_player_stop")
+        stopped = self._stop_and_clear_media_without_blocking_ui(
+            context="stop_player_stop",
+            clear_media=False,
+        )
         if stopped is None:
             log_message("stop(): ignored because another VLC stop is in progress")
             return
@@ -1276,6 +1285,7 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self,
         timeout_ms: int = 8000,
         context: str = "move_current_file_stop",
+        clear_media: bool = True,
     ) -> Optional[bool]:
         """VLC の停止をワーカースレッドで行い、UI を固めずに完了を待つ。
 
@@ -1288,7 +1298,8 @@ class VideoPlayer(QtWidgets.QMainWindow):
         呼び出し（+ スレッドセーフな diagnostics）のみで Qt の QWidget / signal / UI
         状態には一切触れない、という前提に依存している。
 
-        ``set_media(None)`` は **メインスレッドで、かつ stop 完了後にのみ** 実行する。
+        ``clear_media`` が有効な場合、``set_media(None)`` は **メインスレッドで、かつ
+        stop 完了後にのみ** 実行する。
         こうすることで、タイムアウト後に遅れて生き残ったワーカーが、後から再生し直した
         新しいメディアを ``set_media(None)`` で消してしまう事故を防ぐ。さらに timeout
         時は player 自体を差し替え、遅延した ``stop()`` の影響を古い player に閉じ込める。
@@ -1339,8 +1350,13 @@ class VideoPlayer(QtWidgets.QMainWindow):
 
             # stop 完了をメインスレッドで確認してから、メインスレッドでメディアを解放する。
             if self.vlc_player is vlc_player and self._vlc_generation == generation:
-                vlc_player.set_media(None, context=f"{context}_clear_media")
-                log_message(f"[release] VLC stop finished; media cleared: context={context}")
+                if clear_media:
+                    vlc_player.set_media(None, context=f"{context}_clear_media")
+                    log_message(f"[release] VLC stop finished; media cleared: context={context}")
+                else:
+                    log_message(
+                        f"[release] VLC stop finished; media preserved: context={context}"
+                    )
             else:
                 log_message("[release] player changed while releasing; skip clear_media")
             return True

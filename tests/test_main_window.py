@@ -209,6 +209,29 @@ def test_playback_controls_seek_rate_volume_and_mute(player):
     assert player._muted
 
 
+def test_stop_preserves_current_media(player):
+    original_media = player.player.media
+
+    player.stop()
+
+    assert player.player.stopped == 1
+    assert player.player.media is original_media
+
+
+def test_toggle_play_reloads_current_file_when_player_has_no_media(player, monkeypatch):
+    calls = []
+    player.directory_playlist = ["a.mp4"]
+    player.current_index = 0
+    player.player.state = "NothingSpecial"
+    player.player.media = None
+    monkeypatch.setattr(player, "play_at", calls.append)
+
+    player.toggle_play()
+
+    assert calls == [0]
+    assert player.player.played == 0
+
+
 def test_frame_step_falls_back_when_fps_is_unavailable(player):
     player.player.fps = 0
     player.player.time = 1_000

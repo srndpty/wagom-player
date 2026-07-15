@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from wagom_player.playlist import SUPPORTED_VIDEO_EXTENSIONS
+from wagom_player.infrastructure.media_files import SUPPORTED_VIDEO_EXTENSIONS
 
 REG_FILE = Path(__file__).resolve().parents[1] / "windows" / "file-associations.reg"
 

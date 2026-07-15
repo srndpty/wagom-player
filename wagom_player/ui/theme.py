@@ -65,11 +65,12 @@ def apply_dark_theme(app: QtWidgets.QApplication) -> None:
 
 
 def resource_path(*parts: str) -> str:
-    base = os.path.dirname(os.path.abspath(__file__))
+    ui_root = os.path.dirname(os.path.abspath(__file__))
+    package_root = os.path.dirname(ui_root)
     return (
-        os.path.join(os.path.dirname(base), *parts)
+        os.path.join(os.path.dirname(package_root), *parts)
         if parts and parts[0] == "resources"
-        else os.path.join(base, *parts)
+        else os.path.join(package_root, *parts)
     )
 
 

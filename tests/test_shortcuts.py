@@ -1,4 +1,4 @@
-from wagom_player.shortcuts import SHORTCUT_ROWS
+from wagom_player.ui.shortcuts import SHORTCUT_ROWS
 
 
 def test_shortcut_rows_include_existing_keys():

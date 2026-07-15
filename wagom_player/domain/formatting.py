@@ -1,5 +1,5 @@
 def format_ms(ms: int) -> str:
-    """Format milliseconds as MM:SS or HH:MM:SS."""
+    """ミリ秒を MM:SS または HH:MM:SS 形式へ整形する。"""
     if ms <= 0:
         return "00:00"
     seconds = ms // 1000
@@ -11,7 +11,7 @@ def format_ms(ms: int) -> str:
 
 
 def format_size(num_bytes: int) -> str:
-    """Format a byte count as a human-readable string (B/KB/MB/GB/TB)."""
+    """バイト数を読みやすい単位へ整形する。"""
     if num_bytes < 0:
         return ""
     units = ("B", "KB", "MB", "GB", "TB", "PB")

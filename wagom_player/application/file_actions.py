@@ -3,6 +3,23 @@ import os
 import shutil
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+
+
+class CollisionResolution(str, Enum):
+    MOVE = "move"
+    CANCEL = "cancel"
+    DISCARD = "delete"
+    RENAME = "rename"
+
+
+@dataclass(frozen=True)
+class FileActionResult:
+    source_path: str
+    target_path: Optional[str]
+    resolution: CollisionResolution
 
 
 class TargetFileExistsError(FileExistsError):
@@ -51,18 +68,18 @@ def unique_target_path_for_subfolder(
 
 def validate_subfolder_name(subfolder_name: str) -> None:
     if not subfolder_name or subfolder_name in (".", ".."):
-        raise InvalidMoveTargetError("subfolder name must be a plain directory name")
+        raise InvalidMoveTargetError("サブフォルダには通常のディレクトリ名を指定してください")
     if "/" in subfolder_name or "\\" in subfolder_name:
-        raise InvalidMoveTargetError("subfolder name must not contain path separators")
+        raise InvalidMoveTargetError("サブフォルダ名にパス区切り文字は使用できません")
     if (
         os.path.isabs(subfolder_name)
         or ntpath.isabs(subfolder_name)
         or os.path.splitdrive(subfolder_name)[0]
         or ntpath.splitdrive(subfolder_name)[0]
     ):
-        raise InvalidMoveTargetError("subfolder name must be relative")
+        raise InvalidMoveTargetError("サブフォルダ名には相対パスを指定してください")
     if os.path.basename(subfolder_name) != subfolder_name:
-        raise InvalidMoveTargetError("subfolder name must not contain path separators")
+        raise InvalidMoveTargetError("サブフォルダ名にパス区切り文字は使用できません")
 
 
 def validate_move_to_subfolder(file_path: str, subfolder_name: str) -> str:
@@ -73,7 +90,7 @@ def validate_move_to_subfolder(file_path: str, subfolder_name: str) -> str:
     source_abs = os.path.abspath(file_path)
     target_abs = os.path.abspath(target_path_for_subfolder(file_path, subfolder_name))
     if source_abs == target_abs:
-        raise InvalidMoveTargetError("source and target paths must be different")
+        raise InvalidMoveTargetError("移動元と移動先には異なるパスを指定してください")
     if os.path.exists(target_abs):
         raise TargetFileExistsError(target_abs)
     return target_abs
@@ -118,9 +135,9 @@ def move_file_to_path(
         raise FileNotFoundError(file_path)
     target_dir = os.path.dirname(target_file_path)
     if not target_dir:
-        raise InvalidMoveTargetError("target path must include a directory")
+        raise InvalidMoveTargetError("移動先パスにはディレクトリを含めてください")
     if os.path.abspath(file_path) == os.path.abspath(target_file_path):
-        raise InvalidMoveTargetError("source and target paths must be different")
+        raise InvalidMoveTargetError("移動元と移動先には異なるパスを指定してください")
     os.makedirs(target_dir, exist_ok=True)
 
     attempts = len(retry_delays) + 1
@@ -177,5 +194,5 @@ def move_file_to_subfolder_as_unique(
         except TargetFileExistsError as e:
             # 採番後に誰かが同名を作った -> 別名を採り直して再試行
             last_error = e
-    message = f"unique target collision retry limit exceeded: {file_path}"
+    message = f"重複しない移動先名を確保できませんでした: {file_path}"
     raise UniqueTargetRetryLimitExceededError(message) from last_error

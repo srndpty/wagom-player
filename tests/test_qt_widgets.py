@@ -6,9 +6,9 @@ QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
 QtWidgets = pytest.importorskip("PyQt5.QtWidgets", exc_type=ImportError)
 
-dialogs = importlib.import_module("wagom_player.dialogs")
-overlay = importlib.import_module("wagom_player.overlay")
-seek_slider = importlib.import_module("wagom_player.seek_slider")
+dialogs = importlib.import_module("wagom_player.ui.dialogs")
+overlay = importlib.import_module("wagom_player.ui.overlay")
+seek_slider = importlib.import_module("wagom_player.ui.seek_slider")
 
 MetadataDialog = dialogs.MetadataDialog
 ShortcutListDialog = dialogs.ShortcutListDialog

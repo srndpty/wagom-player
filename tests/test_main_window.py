@@ -1,10 +1,13 @@
 import importlib
 import os
+import threading
 
 import pytest
 
 from tests.fakes.vlc import FakeVlc
+from wagom_player.application.file_actions import CollisionResolution
 from wagom_player.infrastructure.trash import TrashService
+from wagom_player.ui.controllers.file_operation_controller import FileOperationController
 
 QtCore = pytest.importorskip("PyQt5.QtCore", exc_type=ImportError)
 QtGui = pytest.importorskip("PyQt5.QtGui", exc_type=ImportError)
@@ -19,10 +22,12 @@ def player(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(main_window, "vlc", fake_vlc)
     monkeypatch.setattr(main_window.diagnostics, "start_heartbeat_timer", lambda parent: None)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    QtCore.QSettings.setDefaultFormat(QtCore.QSettings.IniFormat)
+    QtCore.QSettings.setPath(QtCore.QSettings.IniFormat, QtCore.QSettings.UserScope, str(tmp_path))
     qapp.setOrganizationName("wagom-player-tests")
     qapp.setApplicationName("wagom-player-tests")
     QtCore.QSettings().clear()
-    window = main_window.VideoPlayer()
+    window = main_window.MainWindow()
     yield window
     window.timer.stop()
     window.close()
@@ -111,6 +116,22 @@ def test_load_file_and_directory_collects_playlist_and_plays(player, tmp_path):
     assert player.current_index == 1
     assert player.player.played == 1
     assert player.windowTitle().startswith("[2/2] clip10.mp4")
+
+
+def test_load_file_and_directory_resets_shuffle_button(player, tmp_path):
+    old_file = tmp_path / "old.mp4"
+    new_file = tmp_path / "new.mp4"
+    old_file.write_text("", encoding="utf-8")
+    new_file.write_text("", encoding="utf-8")
+    player.directory_playlist = [str(old_file)]
+    player.current_index = 0
+    player._on_shuffle_toggled(True)
+
+    player._load_file_and_directory(str(new_file))
+
+    assert not player.shuffle_enabled
+    assert not player.btn_shuffle.isChecked()
+    assert not player.act_shuffle.isChecked()
 
 
 def test_open_external_file_ignores_missing_and_duplicate(player, tmp_path, monkeypatch):
@@ -265,7 +286,7 @@ def test_select_audio_track_saves_language_preference(player):
 
     assert player.player.audio_track == 2
     assert player.preferred_audio_language == "en"
-    assert player.settings.value("preferred_audio_language") == "en"
+    assert player.settings_store.value("preferred_audio_language") == "en"
 
 
 def test_saved_audio_language_applies_to_next_matching_track(player):
@@ -301,8 +322,8 @@ def test_select_subtitle_track_saves_enabled_language_preference(player):
     assert player.player.spu == 3
     assert player.subtitle_enabled
     assert player.preferred_subtitle_language == "ja"
-    assert player.settings.value("subtitle_enabled", type=bool)
-    assert player.settings.value("preferred_subtitle_language") == "ja"
+    assert player.settings_store.value("subtitle_enabled", type=bool)
+    assert player.settings_store.value("preferred_subtitle_language") == "ja"
 
 
 def test_select_subtitle_off_saves_disabled_state(player):
@@ -312,7 +333,7 @@ def test_select_subtitle_off_saves_disabled_state(player):
 
     assert player.player.spu == -1
     assert not player.subtitle_enabled
-    assert not player.settings.value("subtitle_enabled", type=bool)
+    assert not player.settings_store.value("subtitle_enabled", type=bool)
 
 
 def test_saved_subtitle_language_applies_when_enabled(player):
@@ -461,7 +482,13 @@ def test_slider_handlers_set_player_time_and_status(player):
 def test_repeat_and_shuffle_toggles(player, monkeypatch):
     player.directory_playlist = ["a.mp4", "b.mp4", "c.mp4"]
     player.current_index = 1
-    monkeypatch.setattr("random.shuffle", lambda items: items.reverse())
+    shuffle_calls = []
+
+    def reverse_shuffle(items):
+        shuffle_calls.append(list(items))
+        items.reverse()
+
+    monkeypatch.setattr("random.shuffle", reverse_shuffle)
 
     player._on_repeat_toggled(True)
     assert player.repeat_enabled
@@ -471,9 +498,11 @@ def test_repeat_and_shuffle_toggles(player, monkeypatch):
     assert player.shuffle_enabled
     assert player.shuffled_playlist == ["b.mp4", "c.mp4", "a.mp4"]
     assert player.btn_shuffle.isChecked()
+    assert len(shuffle_calls) == 1
 
     player._on_shuffle_toggled(False)
     assert player.shuffled_playlist == []
+    assert len(shuffle_calls) == 1
 
 
 def test_play_next_previous_and_media_end_schedule_expected_indices(player, monkeypatch):
@@ -671,7 +700,7 @@ def test_move_current_file_target_exists_cancel_keeps_playlist_and_playback(play
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
     player.player.playing = True
-    player._prompt_target_file_exists = lambda *args, **kwargs: "cancel"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.CANCEL
 
     player._move_current_file_and_play_next("_ok")
 
@@ -695,10 +724,11 @@ def test_move_current_file_target_exists_delete_sends_source_to_trash(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.DISCARD
     # 実際のごみ箱を汚さないよう、TrashService を fake に差し替える
     trashed = []
     player.trash_service = TrashService(lambda path: trashed.append(path))
+    player.file_operation_controller = FileOperationController(player.trash_service)
     calls = []
     monkeypatch.setattr(
         main_window.QtCore.QTimer,
@@ -728,10 +758,11 @@ def test_move_current_file_target_exists_delete_keeps_playlist_when_trash_fails(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.DISCARD
     player.trash_service = TrashService(
         lambda path: (_ for _ in ()).throw(RuntimeError("trash failed"))
     )
+    player.file_operation_controller = FileOperationController(player.trash_service)
     calls = []
     monkeypatch.setattr(player, "play_at", calls.append)
 
@@ -754,9 +785,10 @@ def test_move_current_file_target_exists_delete_does_not_fall_back_to_remove(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "delete"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.DISCARD
     # ごみ箱が無い環境では完全削除にフォールバックしない
     player.trash_service = TrashService(None)
+    player.file_operation_controller = FileOperationController(player.trash_service)
 
     player._move_current_file_and_play_next("_ok")
 
@@ -794,7 +826,7 @@ def test_move_current_file_release_timeout_aborts_operation(player, tmp_path, mo
 def test_stop_and_clear_media_timeout_skips_set_media(player, monkeypatch):
     # stop() がブロックし続ける状況を模し、タイムアウトで False を返すこと、
     # set_media(None) が呼ばれず、player が差し替えられることを確認する。
-    block = main_window.threading.Event()
+    block = threading.Event()
     old_player = player.player
     old_vlc_player = player.vlc_player
     set_media_calls = []
@@ -849,7 +881,7 @@ def test_move_current_file_target_exists_rename_saves_with_unique_name(
     (target_dir / "a.mp4").write_text("existing", encoding="utf-8")
     player.directory_playlist = [str(first), str(second)]
     player.current_index = 0
-    player._prompt_target_file_exists = lambda *args, **kwargs: "rename"
+    player._prompt_target_file_exists = lambda *args, **kwargs: CollisionResolution.RENAME
     calls = []
     monkeypatch.setattr(
         main_window.QtCore.QTimer,
@@ -984,7 +1016,7 @@ def test_metadata_dialog_receives_collected_text(player, monkeypatch):
     player.directory_playlist = ["movie.mp4"]
     player.current_index = 0
     player.player.media.meta = {main_window.vlc.Meta.Title: "Sample"}
-    monkeypatch.setattr(main_window, "MetadataDialog", FakeDialog)
+    monkeypatch.setattr(main_window._implementation, "MetadataDialog", FakeDialog)
 
     player._show_metadata_dialog()
 

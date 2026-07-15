@@ -2,7 +2,7 @@ import os
 import sys
 from types import SimpleNamespace
 
-from wagom_player import diagnostics
+from wagom_player.infrastructure import diagnostics
 
 
 def test_breadcrumbs_are_limited_to_maximum():
